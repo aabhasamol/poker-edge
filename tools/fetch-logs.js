@@ -2,9 +2,9 @@
  * Bulk-fetch your own PokerNow game logs from the browser console.
  *
  * The `/games/<id>/log` endpoint is same-origin and authenticated by your
- * session cookie, so this only works from a tab already signed in to
- * pokernow.club — which is exactly why it runs here rather than anywhere else.
- * No credentials leave your browser.
+ * session cookie, so this only works from a tab already signed in to PokerNow
+ * (pokernow.com, or the older pokernow.club) — which is exactly why it runs
+ * here rather than anywhere else. No credentials leave your browser.
  *
  * Usage:
  *   1. Open your PokerNow game-list page and sign in.

@@ -23,27 +23,50 @@ import { ExtensionMessage, HandMessage, STORAGE_KEY, StatusMessage } from './mes
 /** How often to re-check the URL, for SPA routing that fires no event. */
 const URL_WATCH_MS = 1_000;
 
+declare global {
+  interface Window {
+    __pokerEdgeAttached?: boolean;
+  }
+}
+
 let activeGameId: string | null = null;
 let poller: LogPoller | null = null;
 let latest: HandMessage | null = null;
 let heroName: string | null = null;
 
-void chrome.storage.local.get(`${STORAGE_KEY}.heroName`).then((stored) => {
-  const saved = stored[`${STORAGE_KEY}.heroName`];
-  if (typeof saved === 'string') heroName = saved;
+// Chrome injects on page load AND the service worker injects into tabs that
+// were already open. Without a guard both happen and two pollers race, each
+// consuming lines the other needs.
+if (!window.__pokerEdgeAttached) {
+  window.__pokerEdgeAttached = true;
+  attach();
+}
+
+function attach(): void {
+  // Printed so "is the reader even here?" is answerable at a glance, which is
+  // otherwise the hardest thing to determine about a content script.
+  console.log('[Poker Edge] reader attached to', location.href);
+
+  void chrome.storage.local.get(`${STORAGE_KEY}.heroName`).then((stored) => {
+    const saved = stored[`${STORAGE_KEY}.heroName`];
+    if (typeof saved === 'string') heroName = saved;
+    syncToUrl();
+  });
+
+  setInterval(syncToUrl, URL_WATCH_MS);
+  window.addEventListener('popstate', syncToUrl);
+  window.addEventListener('pagehide', stop);
+
+  document.addEventListener('visibilitychange', () => {
+    // A backgrounded tab is throttled; catch up as soon as it is looked at.
+    if (document.visibilityState === 'visible') void poller?.pollNow();
+  });
+
+  chrome.runtime.onMessage.addListener(onPanelMessage);
   syncToUrl();
-});
+}
 
-setInterval(syncToUrl, URL_WATCH_MS);
-window.addEventListener('popstate', syncToUrl);
-window.addEventListener('pagehide', stop);
-
-document.addEventListener('visibilitychange', () => {
-  // A backgrounded tab is throttled; catch up as soon as it is looked at.
-  if (document.visibilityState === 'visible') void poller?.pollNow();
-});
-
-chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
+function onPanelMessage(message: ExtensionMessage): void {
   // The panel usually opens after play has started, so it asks for state.
   if (message.type === 'request') {
     if (latest) publish(latest);
@@ -55,7 +78,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     // Restart so the seat roster of the next hand resolves hero's id.
     restart();
   }
-});
+}
 
 /** Start, stop or switch the reader to match whatever page we are now on. */
 function syncToUrl(): void {

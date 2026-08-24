@@ -151,7 +151,32 @@ export function makeLogFetcher(
   };
 }
 
-/** Extract the game id from a PokerNow game URL, or null if it is not one. */
+/**
+ * Hosts PokerNow serves games from. Both the .com and .club domains are live
+ * and serve the same application, so both have to be recognised — matching
+ * only one silently disables the reader for anyone on the other.
+ */
+export const POKERNOW_HOSTS: readonly string[] = [
+  'pokernow.com',
+  'www.pokernow.com',
+  'pokernow.club',
+  'www.pokernow.club',
+];
+
+/**
+ * Extract the game id from a PokerNow game URL, or null if it is not one.
+ *
+ * The host is compared exactly rather than by substring, so a lookalike
+ * domain such as `notpokernow.com` cannot make the reader attach and start
+ * sending a page's contents to the panel.
+ */
 export function gameIdFromUrl(url: string): string | null {
-  return /pokernow\.club\/games\/([A-Za-z0-9_-]+)/.exec(url)?.[1] ?? null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (!POKERNOW_HOSTS.includes(parsed.hostname)) return null;
+  return /^\/games\/([A-Za-z0-9_-]+)/.exec(parsed.pathname)?.[1] ?? null;
 }

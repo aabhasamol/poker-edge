@@ -211,9 +211,21 @@ describe('endpoint wiring', () => {
     await expect(makeLogFetcher('pgl_abc', fetchImpl)(null)).rejects.toThrow('403');
   });
 
-  it('recognises a game URL', () => {
+  it('recognises a game URL on either live domain', () => {
+    // .com is what the site actually serves; .club is the older domain.
+    expect(gameIdFromUrl('https://www.pokernow.com/games/pglaYibKFI_a4WtsWjKHuRBW3')).toBe(
+      'pglaYibKFI_a4WtsWjKHuRBW3',
+    );
+    expect(gameIdFromUrl('https://pokernow.com/games/pgl_abc-123')).toBe('pgl_abc-123');
     expect(gameIdFromUrl('https://www.pokernow.club/games/pgl_abc-123')).toBe('pgl_abc-123');
-    expect(gameIdFromUrl('https://www.pokernow.club/start-game')).toBeNull();
+  });
+
+  it('ignores non-game pages and lookalike domains', () => {
+    expect(gameIdFromUrl('https://www.pokernow.com/start-game')).toBeNull();
     expect(gameIdFromUrl('https://example.com/games/pgl_abc')).toBeNull();
+    // Substring matching would attach the reader to an impostor site.
+    expect(gameIdFromUrl('https://notpokernow.com/games/pgl_abc')).toBeNull();
+    expect(gameIdFromUrl('https://pokernow.com.evil.test/games/pgl_abc')).toBeNull();
+    expect(gameIdFromUrl('not a url')).toBeNull();
   });
 });

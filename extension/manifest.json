@@ -5,9 +5,13 @@
   "description": "Reads your PokerNow table as it is dealt and shows live equity, outs and pot odds.",
   "permissions": [
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
+    "https://www.pokernow.com/*",
+    "https://pokernow.com/*",
     "https://www.pokernow.club/*",
     "https://pokernow.club/*"
   ],
@@ -18,6 +22,8 @@
   "content_scripts": [
     {
       "matches": [
+        "https://www.pokernow.com/*",
+        "https://pokernow.com/*",
         "https://www.pokernow.club/*",
         "https://pokernow.club/*"
       ],

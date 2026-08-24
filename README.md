@@ -347,6 +347,10 @@ npm run build:ext
 Then load `extension/dist` at `chrome://extensions` with Developer mode on, and
 click the toolbar button to open the panel next to a game.
 
+It attaches to both live PokerNow domains — `pokernow.com` and the older
+`pokernow.club` — and the service worker injects into tabs that were already
+open, so installing it does not require reloading the game you are sitting at.
+
 ### Why it has to be an extension
 
 The log endpoint is authenticated by the page's session cookie, and hole cards
@@ -389,8 +393,8 @@ npm run replay -- ~/Downloads/poker_now_log.csv --hero "Your Name" --verbose
 ```
 
 Or many games at once. `tools/fetch-logs.js` is pasted into the browser console
-on a signed-in pokernow.club tab; it walks the game links on the page, fetches
-each `/log` with your session, and saves one bundle:
+on a signed-in PokerNow tab; it walks the game links on the page, fetches each
+`/log` with your session, and saves one bundle:
 
 ```bash
 npm run replay -- ~/Downloads/pokernow-logs-*.pokernow.json --hero "Your Name"

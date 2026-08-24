@@ -69,11 +69,15 @@ function Panel() {
         <h1>Poker Edge</h1>
         <p className="subtitle">{describeStatus(status)}</p>
         {status === null && (
-          <p className="subtitle">
-            The reader has not reported in. Reload the PokerNow tab — a content script only
-            attaches on page load, so a tab opened before the extension was installed never got
-            one.
-          </p>
+          <div className="subtitle">
+            <p>
+              The reader has not reported in. Try reconnecting; if that does not help, reload the
+              PokerNow tab.
+            </p>
+            <button type="button" onClick={() => void chrome.runtime.sendMessage({ type: 'reinject' })}>
+              Reconnect to the table
+            </button>
+          </div>
         )}
       </header>
 
