@@ -24,6 +24,15 @@ import { computeRangeEquity, RangeEquityResult } from '../range/rangeEquity';
 import { bestScore, getVariant } from '../engine/variant';
 import { Card } from '../engine/card';
 import { modelAllOpponents, RangeExplanation } from './rangeModel';
+import {
+  addTrap,
+  MixedOption,
+  resolveMix,
+  StrategyProfile,
+  tieMix,
+  TIGHT,
+  trapThresholdFor,
+} from './strategy';
 import { POOL_DEFAULTS, Tendencies } from './tendencies';
 
 export type AdviceAction = 'fold' | 'check' | 'call' | 'raise';
@@ -39,7 +48,14 @@ export interface AdviceOption {
 }
 
 export interface Advice {
+  /** What to actually do — the line drawn from the mix this time. */
   readonly recommendation: AdviceAction;
+  /** The full mixed strategy, so the pattern is visible, not just this draw. */
+  readonly mix: readonly { readonly action: AdviceAction; readonly amount: number; readonly frequency: number }[];
+  /** Expected value given up by mixing and by playing tight, in chips. */
+  readonly shapingCost: number;
+  /** The passive line taken instead, when no edge cleared the bar. */
+  readonly declined: AdviceOption | null;
   /** How much better the best option is than the next, in chips. */
   readonly margin: number;
   readonly confidence: 'clear' | 'close' | 'speculative';
@@ -55,10 +71,19 @@ export interface Advice {
   readonly caveats: readonly string[];
 }
 
+const ACTION_NOUN: Record<AdviceAction, string> = {
+  fold: 'Folding',
+  check: 'Checking',
+  call: 'Calling',
+  raise: 'Raising',
+};
+
 export interface AdviceOptions {
   readonly tendencies?: Tendencies;
   readonly samples?: number;
   readonly seed?: number;
+  /** How tight to play and how much to disguise. Defaults to tight. */
+  readonly strategy?: StrategyProfile;
 }
 
 /**
@@ -210,11 +235,65 @@ export function advise(
   }
 
   const ranked = [...choices].sort((a, b) => b.ev - a.ev);
-  const best = ranked[0]!;
-  const runnerUp = ranked[1];
-  const margin = runnerUp ? best.ev - runnerUp.ev : best.ev;
-
   const bigBlind = hand.bigBlind || 1;
+  const strategy = options.strategy ?? TIGHT;
+
+  /*
+   * The passive line — folding, or checking when it is free — is the baseline
+   * an action has to beat. Requiring a real margin over it is what "tight"
+   * means here: an edge smaller than the equity estimate's own error is not
+   * evidence of an edge.
+   */
+  const passive = ranked.find((option) => option.action === 'fold' || option.action === 'check')!;
+  const requiredEdge = strategy.requiredEdgeBB * bigBlind;
+  const cleared = ranked.filter(
+    (option) => option === passive || option.ev - passive.ev >= requiredEdge,
+  );
+  const declined =
+    cleared.length === 1 && ranked.length > 1 && ranked[0] !== passive ? ranked[0]! : null;
+  if (declined) {
+    caveats.push(
+      `${ACTION_NOUN[declined.action]} shows an edge of ${(declined.ev - passive.ev).toFixed(1)} chips, ` +
+        `under the ${requiredEdge.toFixed(1)} this profile requires before entering a pot.`,
+    );
+  }
+
+  /*
+   * Mix between lines that are close in value, and deliberately flat-call some
+   * of the time with a hand strong enough to raise. Always raising the strong
+   * ones and only those makes the raise itself the tell.
+   */
+  const decisionKey = [
+    hand.handId ?? hand.handNumber,
+    hand.street,
+    hand.actions.length,
+    state.hole.map((card) => `${card.rank}${card.suit}`).join(''),
+  ].join('|');
+
+  let candidates = tieMix(cleared, strategy.mixToleranceBB * bigBlind);
+
+  // Trapping: strong enough to raise, but flat-call sometimes so the raising
+  // range is not purely the strong hands.
+  const strongEnoughToTrap = equity.equity >= trapThresholdFor(strategy, ranges.length);
+  const raiseIsBest = candidates.some((entry) => entry.option.action === 'raise');
+  const flatCall = cleared.find((option) => option.action === 'call');
+  if (strongEnoughToTrap && raiseIsBest && flatCall && strategy.trapFrequency > 0) {
+    candidates = addTrap(candidates, flatCall, strategy.trapFrequency);
+  }
+
+  const mixed = resolveMix(candidates, cleared, decisionKey);
+
+  const best = mixed.chosen;
+  const runnerUp = ranked.find((option) => option !== best);
+  const margin = runnerUp ? ranked[0]!.ev - runnerUp.ev : ranked[0]!.ev;
+  const shapingCost = mixed.cost + (declined ? declined.ev - passive.ev : 0);
+
+  if (mixed.mix.length > 1) {
+    caveats.push(
+      `Mixing between ${mixed.mix.length} lines costs about ${mixed.cost.toFixed(1)} chips this hand, ` +
+        'and only pays against opponents who are watching for a pattern.',
+    );
+  }
   const confidence =
     caveats.some((c) => c.includes('empty')) || equity.samples === 0
       ? 'speculative'
@@ -226,6 +305,13 @@ export function advise(
 
   return {
     recommendation: best.action,
+    mix: mixed.mix.map((entry: MixedOption<AdviceOption>) => ({
+      action: entry.option.action,
+      amount: entry.option.amount,
+      frequency: entry.frequency,
+    })),
+    shapingCost,
+    declined,
     margin,
     confidence,
     options: ranked,

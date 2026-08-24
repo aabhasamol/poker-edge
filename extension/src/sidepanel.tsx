@@ -35,6 +35,21 @@ function Panel() {
   const [heroNameGuess, setHeroNameGuess] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [nameInput, setNameInput] = useState('');
+  // Defaults to tight: the reason to reach for this tool is usually that you
+  // are entering too many pots, not too few.
+  const [profile, setProfile] = useState('tight');
+
+  useEffect(() => {
+    void chrome.storage.local.get(`${STORAGE_KEY}.profile`).then((stored) => {
+      const saved = stored[`${STORAGE_KEY}.profile`];
+      if (typeof saved === 'string') setProfile(saved);
+    });
+  }, []);
+
+  function chooseProfile(next: string) {
+    setProfile(next);
+    void chrome.storage.local.set({ [`${STORAGE_KEY}.profile`]: next });
+  }
 
   useEffect(() => {
     // Show the last known state at once rather than waiting for a poll.
@@ -64,7 +79,7 @@ function Panel() {
     [hand, heroId],
   );
   const { analysis, computing } = useAnalysis(bridged.state ?? IDLE_STATE);
-  const { advice, thinking, error: adviceError } = useAdvice(hand, heroId, bridged.state);
+  const { advice, thinking, error: adviceError } = useAdvice(hand, heroId, bridged.state, profile);
 
   return (
     <div className="app panel-app">
@@ -114,7 +129,15 @@ function Panel() {
         </div>
       )}
 
-      {bridged.state && <AdvicePanel advice={advice} thinking={thinking} error={adviceError} />}
+      {bridged.state && (
+        <AdvicePanel
+          advice={advice}
+          thinking={thinking}
+          error={adviceError}
+          profile={profile}
+          onProfile={chooseProfile}
+        />
+      )}
 
       {bridged.state ? (
         <Dashboard analysis={analysis} computing={computing} onSave={() => {}} canSave={false} />

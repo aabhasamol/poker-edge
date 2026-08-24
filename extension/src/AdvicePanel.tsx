@@ -11,11 +11,14 @@
  */
 
 import { Advice } from '../../src/advisor/advisor';
+import { PROFILES } from '../../src/advisor/strategy';
 
 interface AdvicePanelProps {
   advice: Advice | null;
   thinking: boolean;
   error: string | null;
+  profile: string;
+  onProfile: (profile: string) => void;
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -25,7 +28,7 @@ const ACTION_LABEL: Record<string, string> = {
   raise: 'Raise',
 };
 
-export function AdvicePanel({ advice, thinking, error }: AdvicePanelProps) {
+export function AdvicePanel({ advice, thinking, error, profile, onProfile }: AdvicePanelProps) {
   if (error) {
     return (
       <div className="panel">
@@ -58,6 +61,38 @@ export function AdvicePanel({ advice, thinking, error }: AdvicePanelProps) {
               : 'Speculative — rests on a model of how they play'}
         </p>
       </div>
+
+      {/*
+        When a line is mixed, the headline is one draw from it. Showing the
+        frequencies keeps that honest: the point of mixing is the pattern over
+        many hands, and an opponent watching you sees the pattern, not the draw.
+      */}
+      {advice.mix.length > 1 && (
+        <div className="section mix">
+          <h3>Mixed line</h3>
+          <p className="subtitle">
+            {advice.mix
+              .map((entry) => `${ACTION_LABEL[entry.action] ?? entry.action} ${Math.round(entry.frequency * 100)}%`)
+              .join(' · ')}
+            {' — this hand: '}
+            <strong>{ACTION_LABEL[advice.recommendation] ?? advice.recommendation}</strong>
+          </p>
+          {advice.shapingCost > 0 && (
+            <p className="subtitle">
+              Disguise costs about {advice.shapingCost.toFixed(1)} chips here.
+            </p>
+          )}
+        </div>
+      )}
+
+      {advice.declined && (
+        <div className="section">
+          <p className="subtitle">
+            {ACTION_LABEL[advice.declined.action]} shows a small edge (
+            {advice.declined.ev.toFixed(1)} chips) but not enough for the {profile} profile.
+          </p>
+        </div>
+      )}
 
       <div className="section">
         <table className="live-table">
@@ -126,6 +161,27 @@ export function AdvicePanel({ advice, thinking, error }: AdvicePanelProps) {
             </li>
           ))}
         </ul>
+      </div>
+
+      <div className="section">
+        <h3>How tight to play</h3>
+        <div className="profile-picker">
+          {Object.entries(PROFILES).map(([key, value]) => (
+            <button
+              key={key}
+              type="button"
+              className={key === profile ? 'is-selected' : ''}
+              onClick={() => onProfile(key)}
+            >
+              {value.name}
+            </button>
+          ))}
+        </div>
+        <p className="subtitle">
+          {PROFILES[profile]?.requiredEdgeBB
+            ? `Only enters a pot when the edge beats ${PROFILES[profile]!.requiredEdgeBB} BB — smaller edges are inside the estimate's own error.`
+            : 'Takes every edge, however thin.'}
+        </p>
       </div>
 
       {advice.caveats.length > 0 && (

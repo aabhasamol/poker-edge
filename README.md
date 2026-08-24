@@ -266,6 +266,7 @@ src/
     preflopStrength.ts GENERATED strength ordering (see tools/)
     rangeEquity.ts     Equity against ranges, by rejection sampling
   advisor/           Fold/call/raise recommendations
+    strategy.ts        Tightness profiles and mixed strategies
     tendencies.ts      Population priors, replaceable per player
     rangeModel.ts      Actions -> a range, with its reasoning
     advisor.ts         Expected value of each option
@@ -346,6 +347,39 @@ The same applies to who calls. Priced on pot odds alone, the blinds cold-called
 folded 97% to a simple steal. What a player needs to continue depends on what
 they are walking into, so the penalty scales with how many opponents have
 already shown aggression.
+
+### Tightness and mixing
+
+The advisor computes what each option is worth. Two things that matters for
+sit outside a single hand's arithmetic, and live in `strategy.ts`.
+
+**Tightness.** A marginal edge is not worth acting on. The equity behind it
+carries a Monte-Carlo error of about half a point, and the range model behind
+*that* is a model of behaviour rather than a measurement — so an edge of a
+fifth of a big blind is indistinguishable from zero. Requiring a real margin
+before entering a pot is not sacrificing expected value; it is declining to act
+on numbers too small to trust. Three profiles ship (Loose, Standard, Tight);
+the panel defaults to Tight, and always says what it declined and by how much.
+
+The bar has to stay honest in the other direction too: a profile so tight it
+folds AK to one raise is not tight, it is broken. Tests pin both ends.
+
+**Mixing.** Always taking the highest-value line makes you readable — an
+opponent who notices you only ever raise strong hands can fold to every raise
+and stop paying you off. Mixing costs value per hand and buys unpredictability.
+The cost is measurable; the benefit is not, since it depends on opponents
+actually adapting. So the cost is always shown, and mixing concentrates where
+it is cheapest — between lines of nearly equal value.
+
+Trapping is the exception that must be forced: flat-calling with a hand worth
+raising is *deliberately* worse, so restricting it to near-ties means it never
+fires at all. What counts as strong enough to disguise scales with the field —
+aces four-handed and ace-king heads-up both hold about 62%, and only one of
+those is worth hiding.
+
+Mixed lines are drawn deterministically from the decision, not the moment. A
+recommendation that flickered between raise and call while you were deciding
+would be unusable.
 
 ### What the advisor will not tell you
 

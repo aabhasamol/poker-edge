@@ -9,6 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Advice } from '../../src/advisor/advisor';
 import { GameState } from '../../src/engine/gameState';
+import { PROFILES, TIGHT } from '../../src/advisor/strategy';
 import { amountToCall, LiveHand } from '../../src/pokernow/handState';
 import type { AdviceRequest, AdviceResponse } from '../../src/worker/advice.worker';
 
@@ -16,6 +17,7 @@ export function useAdvice(
   hand: LiveHand | null,
   heroId: string | null,
   state: GameState | null,
+  profile: string,
 ): { advice: Advice | null; thinking: boolean; error: string | null } {
   const [advice, setAdvice] = useState<Advice | null>(null);
   const [thinking, setThinking] = useState(false);
@@ -52,8 +54,9 @@ export function useAdvice(
       amountToCall(hand, heroId),
       hand.actions.length,
       contesting,
+      profile,
     ].join('/');
-  }, [hand, heroId, state]);
+  }, [hand, heroId, state, profile]);
 
   useEffect(() => {
     const worker = workerRef.current;
@@ -68,7 +71,7 @@ export function useAdvice(
       hand,
       heroId,
       state,
-      options: { samples: 12_000 },
+      options: { samples: 12_000, strategy: PROFILES[profile] ?? TIGHT },
     };
     worker.postMessage(request);
     // Intentionally keyed on `key`, not on `hand`: identical situations must

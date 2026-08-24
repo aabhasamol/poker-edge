@@ -73,3 +73,25 @@
   opacity: 0.75;
   font-size: 0.85em;
 }
+
+.profile-picker {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.profile-picker button {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.profile-picker button.is-selected {
+  outline: 2px solid currentColor;
+  font-weight: 600;
+}
+
+.mix .subtitle {
+  margin: 2px 0;
+}
