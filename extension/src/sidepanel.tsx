@@ -11,7 +11,7 @@ import { StrictMode, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PROFILES } from '../../src/advisor/strategy';
 import { toGameState } from '../../src/pokernow/bridge';
-import { LiveHand } from '../../src/pokernow/handState';
+import { hasPendingDecision, LiveHand } from '../../src/pokernow/handState';
 import './panel.css';
 import { Caveats, Decision, KeyNumbers, Options, Players, TableState } from './components';
 import { ExtensionMessage, STORAGE_KEY, StatusMessage } from './messages';
@@ -74,6 +74,11 @@ function Panel() {
     profiles.tendenciesByPlayer,
   );
 
+  // The log never says whose turn it is, but it says enough to work out
+  // whether hero still owes an action. Recommending a line while the table's
+  // buttons are greyed out is advice for a decision already made.
+  const yourMove = hand !== null && heroId !== null && hasPendingDecision(hand, heroId);
+
   function chooseStrategy(next: string) {
     setStrategy(next);
     void chrome.storage.local.set({ [`${STORAGE_KEY}.profile`]: next });
@@ -119,7 +124,11 @@ function Panel() {
 
       {advice && bridged.state && hand ? (
         <>
-          <Decision advice={advice} thinking={thinking} />
+          {yourMove ? (
+            <Decision advice={advice} thinking={thinking} />
+          ) : (
+            <Waiting hand={hand} heroId={heroId} advice={advice} />
+          )}
           <KeyNumbers advice={advice} />
           <Options advice={advice} />
           <Players
@@ -169,6 +178,38 @@ function Panel() {
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * Shown while hero has nothing to decide. The read is still worth seeing — it
+ * is what the next decision will rest on — but it must not look like a call to
+ * act.
+ */
+function Waiting({
+  hand,
+  heroId,
+  advice,
+}: {
+  hand: LiveHand;
+  heroId: string | null;
+  advice: { equity: { equity: number } };
+}) {
+  const live = hand.players.filter((player) => player.status !== 'folded' && player.id !== heroId);
+  const waitingOn = live.filter((player) => !player.hasActedThisStreet);
+
+  return (
+    <section className="card decision" style={{ ['--action-colour' as string]: 'var(--check)' }}>
+      <div className="decision-action">
+        <h2>Waiting</h2>
+      </div>
+      <p className="decision-note">
+        {waitingOn.length > 0
+          ? `On ${waitingOn.map((player) => player.name).join(', ')}.`
+          : 'The action is elsewhere.'}{' '}
+        You hold {(advice.equity.equity * 100).toFixed(0)}% against their ranges.
+      </p>
+    </section>
   );
 }
 

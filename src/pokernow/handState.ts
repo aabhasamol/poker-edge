@@ -541,6 +541,28 @@ export function effectiveStack(hand: LiveHand, heroId: string): number {
   return Math.min(hero.stack + hero.committedStreet, deepestOpponent);
 }
 
+/**
+ * Whether hero still has a decision to make on this street.
+ *
+ * The log never says whose turn it is, but it does not need to: a player owes
+ * an action when they are still in the hand and either face a bet they have not
+ * matched, or have not acted since the last time the action was opened. A raise
+ * reopens it, which the tracker already records by clearing everyone else's
+ * `hasActedThisStreet`.
+ *
+ * Without this the panel recommends a line while the table's buttons are greyed
+ * out — advice for a decision that has already been made.
+ */
+export function hasPendingDecision(hand: LiveHand, heroId: string): boolean {
+  const hero = findPlayer(hand, heroId);
+  if (!hero || hero.status !== 'active' || hand.complete) return false;
+
+  // Nobody left to act against.
+  if (contestingPlayers(hand).length < 2) return false;
+
+  return amountToCall(hand, heroId) > 0 || !hero.hasActedThisStreet;
+}
+
 /** Street index, for comparisons and iteration. */
 export function streetIndex(street: Street): number {
   return STREET_ORDER.indexOf(street);

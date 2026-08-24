@@ -6,6 +6,7 @@ import {
   effectiveStack,
   findPlayer,
   HandTracker,
+  hasPendingDecision,
   LiveHand,
 } from '../handState';
 import { parseLogMessage } from '../logParser';
@@ -271,5 +272,55 @@ describe('accounting safeguards', () => {
     const hand = tracker.snapshot();
     expect(cardsToString(hand.board)).toBe('A♥ 7♦ 2♣');
     expect(hand.extraRuns).toHaveLength(1);
+  });
+});
+
+describe('knowing whose turn it is', () => {
+  /** Replay a heads-up hand through the given flop actions. */
+  function flopHand(...actions: string[]): LiveHand {
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #1 (id: t1)  No Limit Texas Hold\'em (dealer: "Hero @ hero") --',
+      'Player stacks: #1 "Hero @ hero" (2000) | #2 "Villain @ vil" (2000)',
+      '"Hero @ hero" posts a small blind of 10',
+      '"Villain @ vil" posts a big blind of 20',
+      'Your hand is K♦, 7♦',
+      '"Hero @ hero" calls 20',
+      '"Villain @ vil" checks',
+      'Flop:  [9♦, K♣, J♥]',
+      ...actions,
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    return tracker.snapshot();
+  }
+
+  it('owes an action at the start of a street', () => {
+    expect(hasPendingDecision(flopHand(), 'hero')).toBe(true);
+  });
+
+  it('owes nothing after betting until someone responds', () => {
+    // The regression: the panel kept recommending a raise while the table's
+    // buttons were greyed out, because hero had already bet.
+    expect(hasPendingDecision(flopHand('"Hero @ hero" bets 60'), 'hero')).toBe(false);
+  });
+
+  it('owes an action again once the bet is raised', () => {
+    const hand = flopHand('"Hero @ hero" bets 60', '"Villain @ vil" raises to 180');
+    expect(hasPendingDecision(hand, 'hero')).toBe(true);
+  });
+
+  it('owes nothing once the bet is merely called', () => {
+    const hand = flopHand('"Hero @ hero" bets 60', '"Villain @ vil" calls 60');
+    expect(hasPendingDecision(hand, 'hero')).toBe(false);
+  });
+
+  it('owes an action when facing a bet', () => {
+    expect(hasPendingDecision(flopHand('"Villain @ vil" bets 60'), 'hero')).toBe(true);
+  });
+
+  it('owes nothing after folding, or once the hand is over', () => {
+    const folded = flopHand('"Villain @ vil" bets 60', '"Hero @ hero" folds');
+    expect(hasPendingDecision(folded, 'hero')).toBe(false);
   });
 });
