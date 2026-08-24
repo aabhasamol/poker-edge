@@ -17,6 +17,7 @@
 
 import { GameState } from '../engine/gameState';
 import { amountToCall, LiveHand, PlayerState } from '../pokernow/handState';
+import { actsLast } from '../pokernow/positions';
 import { comboCards, comboFromIndex } from '../range/combos';
 import { Range } from '../range/range';
 import { computeRangeEquity, RangeEquityResult } from '../range/rangeEquity';
@@ -60,8 +61,12 @@ export interface AdviceOptions {
   readonly seed?: number;
 }
 
-/** Below this EV gap, two options are not meaningfully different. */
-const CLOSE_CALL_CHIPS = 0.05;
+/**
+ * Below this EV gap, in big blinds, two options are not meaningfully
+ * different. Set above the Monte-Carlo error so a margin inside the
+ * simulation's own noise is never reported as a clear decision.
+ */
+const CLOSE_CALL_BB = 0.25;
 
 export function advise(
   hand: LiveHand,
@@ -188,14 +193,19 @@ export function advise(
       tendencies,
       hand,
       opponents.map((entry) => entry.player.status !== 'allIn' && entry.player.stack > 0),
+      heroActsLast(hand, heroId),
+      opponents.map((entry) => hasVoluntarilyEntered(hand, entry.player.id)),
+      countAggressors(hand, heroId),
     );
     choices.push({
       action: 'raise',
       amount: option.amount,
       ev: evaluated.ev,
       basis:
-        `${option.label}: they fold ${(evaluated.foldProbability * 100).toFixed(0)}% of the time; ` +
-        `when called hero holds ${(evaluated.equityWhenCalled * 100).toFixed(1)}%.`,
+        `${option.label}: they fold ${(evaluated.foldProbability * 100).toFixed(0)}% of the time, ` +
+        `come back over the top ${(evaluated.reRaiseProbability * 100).toFixed(0)}%; ` +
+        `when called hero collects ${(evaluated.equityWhenCalled * 100).toFixed(1)}% ` +
+        `(${(evaluated.realization * 100).toFixed(0)}% of raw equity).`,
     });
   }
 
@@ -208,7 +218,7 @@ export function advise(
   const confidence =
     caveats.some((c) => c.includes('empty')) || equity.samples === 0
       ? 'speculative'
-      : margin < CLOSE_CALL_CHIPS * bigBlind
+      : margin < CLOSE_CALL_BB * bigBlind
         ? 'close'
         : opponents.some((entry) => !entry.explanation.wellFounded)
           ? 'speculative'
@@ -265,6 +275,34 @@ interface RaiseEvaluation {
   readonly ev: number;
   readonly foldProbability: number;
   readonly equityWhenCalled: number;
+  /** Chance somebody comes back over the top. */
+  readonly reRaiseProbability: number;
+  /** Share of raw equity hero is assumed to actually collect. */
+  readonly realization: number;
+}
+
+/**
+ * Share of a continuing range strong enough to re-raise rather than just call.
+ *
+ * Without this branch the model believes a raise has exactly two outcomes —
+ * everyone folds, or somebody calls and the hand runs to showdown. Getting
+ * blown off the hand is invisible, so raising junk looks free: it collects the
+ * pot when they fold and realises its share when they call. That is what made
+ * 72o a profitable button open.
+ */
+const RE_RAISE_SLICE = 0.12;
+
+/**
+ * Hands do not collect their raw equity. Weak holdings get outplayed after the
+ * flop and fold before showdown; position and heads-up pots help. This scales
+ * the contested branch, which otherwise assumes every hand plays perfectly to
+ * showdown and so systematically flatters the worst ones.
+ */
+function equityRealization(equity: number, inPosition: boolean, opponents: number): number {
+  const base = 0.72 + 0.32 * equity;
+  const positional = inPosition ? 0.06 : -0.06;
+  const crowd = 0.04 * Math.max(0, opponents - 1);
+  return clamp(base + positional - crowd, 0.45, 1);
 }
 
 /**
@@ -286,16 +324,24 @@ function evaluateRaise(
   hand: LiveHand,
   /** Whether each opponent is able to fold at all; all-in players are not. */
   canFold: readonly boolean[],
+  /** True when hero acts after every opponent still in the pot. */
+  inPosition: boolean,
+  /** Whether each opponent has voluntarily put money in this hand. */
+  hasEntered: readonly boolean[],
+  /** How many opponents had already bet or raised before hero's raise. */
+  priorAggressors: number,
 ): RaiseEvaluation {
   if (ranges.length === 0) {
-    return { ev: pot, foldProbability: 1, equityWhenCalled: 1 };
+    return { ev: pot, foldProbability: 1, equityWhenCalled: 1, reRaiseProbability: 0, realization: 1 };
   }
 
   const price = raise / (pot + raise);
   const split = ranges.map((range, index) => {
     // An all-in player sees every card regardless of what hero does.
-    if (canFold[index] === false) return { continuing: range, foldProbability: 0 };
-    return splitByPrice(range, state, price, tendencies, hand);
+    if (canFold[index] === false) {
+      return { continuing: range, foldProbability: 0, reRaiseProbability: 0 };
+    }
+    return splitByPrice(range, state, price, tendencies, hand, hasEntered[index] ?? true, priorAggressors);
   });
 
   const foldProbability = split.reduce((product, part) => product * part.foldProbability, 1);
@@ -304,12 +350,35 @@ function evaluateRaise(
   const contested = continuing.every((range) => !range.isEmpty())
     ? computeRangeEquity(state, continuing, sampling)
     : null;
-  const equityWhenCalled = contested?.impossible === false ? contested.equity : 0;
+  const rawEquity = contested?.impossible === false ? contested.equity : 0;
+
+  const realization = equityRealization(rawEquity, inPosition, ranges.length);
+  const equityWhenCalled = rawEquity * realization;
+
+  // Somebody re-raising is a third outcome, and for a weak hand the expensive
+  // one. Its probability is the strong tail of whoever is still in.
+  const reRaiseProbability =
+    1 - split.reduce((product, part) => product * (1 - part.reRaiseProbability), 1);
+  const flatCallProbability = Math.max(0, 1 - foldProbability - reRaiseProbability);
 
   const wonOutright = foldProbability * pot;
   const contestedPot = pot + 2 * raise;
-  const whenCalled = (1 - foldProbability) * (equityWhenCalled * contestedPot - raise);
-  return { ev: wonOutright + whenCalled, foldProbability, equityWhenCalled };
+  const whenCalled = flatCallProbability * (equityWhenCalled * contestedPot - raise);
+
+  /*
+   * Facing a re-raise, hero picks the better of folding and continuing. Taking
+   * the maximum rather than always folding keeps strong hands from being
+   * punished for the same branch that correctly punishes junk.
+   */
+  const reRaised = reRaiseProbability * Math.max(-raise, equityWhenCalled * (pot + 4 * raise) - 2 * raise);
+
+  return {
+    ev: wonOutright + whenCalled + reRaised,
+    foldProbability,
+    equityWhenCalled,
+    reRaiseProbability,
+    realization,
+  };
 }
 
 /**
@@ -328,11 +397,46 @@ function splitByPrice(
   price: number,
   tendencies: Tendencies,
   hand: LiveHand,
-): { continuing: Range; foldProbability: number } {
+  hasEntered: boolean,
+  priorAggressors: number,
+): { continuing: Range; foldProbability: number; reRaiseProbability: number } {
   const percentiles = strengthOrder(range, state.board, hand);
-  const threshold = clamp(price * (1.7 - tendencies.stickiness), 0, 0.95);
+
+  /*
+   * Someone who has not voluntarily put a chip in needs more than the raw price
+   * to continue, and how much more depends on what they are walking into.
+   *
+   * Against a lone raiser they are merely first in — the blinds defend a button
+   * open fairly wide. Against a raise AND a re-raise they would be cold-calling
+   * a pot two players have already contested, which is a different question
+   * entirely. Priced on the odds alone the blinds cold-called 3-bets a quarter
+   * of the time with random cards, enough to make raising AK look unprofitable;
+   * priced with a flat penalty they folded 97% to a simple steal, which made
+   * raising 72o look free. The penalty has to scale with the aggression.
+   */
+  const cold = !hasEntered && state.board.length < 3;
+  const coldPenalty = cold ? 1 + 0.35 * priorAggressors : 1;
+  const threshold = clamp(price * (1.7 - tendencies.stickiness) * coldPenalty, 0, 0.97);
+
+  /*
+   * Which holdings come back over the top.
+   *
+   * Pre-flop this must be an ABSOLUTE standard — the premium hands — not a
+   * fixed slice of whatever happens to continue. A slice makes every opponent
+   * re-raise at the same rate no matter how weak their range is, which taxes
+   * hero's raise identically against a blind holding random cards and against
+   * an early-position opener. That tax was enough to fold AK to a single raise.
+   *
+   * Post-flop, strength is genuinely relative to the board, so a top slice of
+   * the range is the right notion there.
+   */
+  const preflop = state.board.length < 3;
+  const premium = preflop ? Range.topPercent(tendencies.threeBetPercent) : null;
+  const reRaiseSet = (index: number, percentile: number): number =>
+    premium ? (premium.weightAt(index) > 0 ? 1 : 0) : percentile > 1 - RE_RAISE_SLICE ? 1 : 0;
 
   let folding = 0;
+  let reRaising = 0;
   let total = 0;
   const continuing = range.reweight((index, weight) => {
     const percentile = percentiles.get(index) ?? 0.5;
@@ -340,12 +444,14 @@ function splitByPrice(
     const keep = 1 / (1 + Math.exp(-(percentile - threshold) / 0.08));
     total += weight;
     folding += weight * (1 - keep);
+    reRaising += weight * keep * reRaiseSet(index, percentile);
     return keep;
   });
 
   return {
     continuing,
     foldProbability: total > 0 ? folding / total : 1,
+    reRaiseProbability: total > 0 ? reRaising / total : 0,
   };
 }
 
@@ -374,6 +480,42 @@ function strengthOrder(
   const last = Math.max(1, scored.length - 1);
   scored.forEach((entry, rank) => percentiles.set(entry.index, rank / last));
   return percentiles;
+}
+
+/** Opponents who have already bet or raised on the current street. */
+function countAggressors(hand: LiveHand, heroId: string): number {
+  const ids = new Set(
+    hand.actions
+      .filter(
+        (action) =>
+          action.street === hand.street &&
+          action.playerId !== heroId &&
+          (action.action === 'bet' || action.action === 'raise'),
+      )
+      .map((action) => action.playerId),
+  );
+  return ids.size;
+}
+
+/** True when this player has voluntarily invested, blinds excluded. */
+function hasVoluntarilyEntered(hand: LiveHand, playerId: string): boolean {
+  return hand.actions.some(
+    (action) =>
+      action.playerId === playerId &&
+      action.added > 0 &&
+      (action.action === 'call' || action.action === 'bet' || action.action === 'raise'),
+  );
+}
+
+/**
+ * True when hero acts after every opponent still in the pot. Position is worth
+ * real equity realisation: acting last means seeing what they do first.
+ */
+function heroActsLast(hand: LiveHand, heroId: string): boolean {
+  const order = hand.players.map((player) => player.id);
+  const live = hand.players.filter((p) => p.status !== 'folded' && p.id !== heroId);
+  if (live.length === 0 || hand.dealerId === null) return false;
+  return live.every((opponent) => actsLast(order, hand.dealerId, heroId, opponent.id));
 }
 
 function clamp(value: number, min: number, max: number): number {

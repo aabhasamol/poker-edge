@@ -322,6 +322,31 @@ mistake a range model can make.
 Frequencies live in a replaceable `Tendencies` object holding population priors
 for a home game. The player profiler replaces those with measurements.
 
+### Why a raise is not just fold-equity plus showdown
+
+An early version opened 72o from the button for a profit. The arithmetic was
+sound and the model was missing two things:
+
+- **Being re-raised.** A raise was modelled as having exactly two outcomes:
+  everyone folds, or somebody calls and the hand runs to showdown. Getting
+  blown off the hand was invisible, so raising junk looked free.
+- **Equity realisation.** Weak holdings do not collect their raw equity — they
+  get outplayed after the flop and fold before showdown. The contested branch
+  is scaled by a realisation factor that depends on hand strength, position and
+  how many opponents are in.
+
+Correcting only the first over-corrected: taxing every raise at a flat
+re-raise rate folded AK to a single open. Pre-flop, re-raising has to be an
+**absolute** standard — the premium hands — not a fixed slice of whatever
+continues, or a blind holding random cards punishes hero's raise exactly as
+hard as an early-position opener does.
+
+The same applies to who calls. Priced on pot odds alone, the blinds cold-called
+3-bets a quarter of the time with random cards; priced with a flat penalty they
+folded 97% to a simple steal. What a player needs to continue depends on what
+they are walking into, so the penalty scales with how many opponents have
+already shown aggression.
+
 ### What the advisor will not tell you
 
 Expected values are in chips, relative to folding now; chips already in the pot
