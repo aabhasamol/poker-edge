@@ -64,6 +64,15 @@ export interface ActionRecord {
   readonly facingBet: boolean;
 }
 
+export interface CollectedPot {
+  readonly playerId: string;
+  readonly amount: number;
+  /** Winning hand label from the log, when the pot went to showdown. */
+  readonly handLabel: string | null;
+  /** The winning five cards — board plus hole, not the hole cards alone. */
+  readonly combination: readonly Card[] | null;
+}
+
 export interface LiveHand {
   readonly handNumber: number | null;
   readonly handId: string | null;
@@ -82,7 +91,7 @@ export interface LiveHand {
   readonly currentBet: number;
   readonly lastAggressorId: string | null;
   readonly actions: readonly ActionRecord[];
-  readonly collected: readonly { readonly playerId: string; readonly amount: number }[];
+  readonly collected: readonly CollectedPot[];
   readonly complete: boolean;
   /** Board cards from second/third runs, kept out of the main board. */
   readonly extraRuns: readonly (readonly Card[])[];
@@ -105,6 +114,9 @@ interface MutablePlayer {
 
 const STREET_ORDER: readonly Street[] = ['preflop', 'flop', 'turn', 'river'];
 
+/** Upper bound on the share of a pot a house could plausibly take. */
+const MAX_PLAUSIBLE_RAKE = 0.1;
+
 export class HandTracker {
   private handNumber: number | null = null;
   private handId: string | null = null;
@@ -123,7 +135,9 @@ export class HandTracker {
   private currentBet = 0;
   private lastAggressorId: string | null = null;
   private actions: ActionRecord[] = [];
-  private collected: { playerId: string; amount: number }[] = [];
+  private collected: CollectedPot[] = [];
+  /** Live (non-missed) blinds already posted this hand, as `id:kind`. */
+  private liveBlindsPosted = new Set<string>();
   private returned = 0;
   private complete = false;
   private diagnostics: string[] = [];
@@ -149,6 +163,7 @@ export class HandTracker {
     this.lastAggressorId = null;
     this.actions = [];
     this.collected = [];
+    this.liveBlindsPosted = new Set();
     this.returned = 0;
     this.complete = false;
     this.diagnostics = [];
@@ -205,7 +220,12 @@ export class HandTracker {
       }
 
       case 'collect':
-        this.collected.push({ playerId: event.player.id, amount: event.amount });
+        this.collected.push({
+          playerId: event.player.id,
+          amount: event.amount,
+          handLabel: event.handLabel,
+          combination: event.combination ? [...event.combination] : null,
+        });
         return;
 
       case 'uncalledReturn': {
@@ -224,10 +244,12 @@ export class HandTracker {
 
       case 'handEnd':
         this.complete = true;
+        this.verifyHandStructure();
         this.verifyChipConservation();
         return;
 
       case 'seatChange':
+      case 'tableNote':
         return;
 
       case 'unknown':
@@ -254,6 +276,18 @@ export class HandTracker {
 
   private applyBlind(event: Extract<PokerNowEvent, { kind: 'blind' }>): void {
     const player = this.ensurePlayer(event.player);
+
+    /*
+     * A player who posts the live blind AND a "missing" blind of the same kind
+     * is charged only once. Established from a real hand: three players began
+     * with 7540 chips; afterwards two held 3680 and 2280, so the third ended on
+     * 1580 having started at 1610 — 30 chips, not the 40 the two lines imply.
+     * The pot collected (70) matches 30 as well. The duplicate line is an
+     * announcement, not a second charge.
+     */
+    const blindKey = `${player.id}:${event.blind}`;
+    if (event.missing && this.liveBlindsPosted.has(blindKey)) return;
+    if (!event.missing) this.liveBlindsPosted.add(blindKey);
 
     if (event.blind === 'ante') {
       this.antes += event.amount;
@@ -371,20 +405,51 @@ export class HandTracker {
 
   /**
    * Total contributions must equal total winnings once uncalled bets are
-   * returned. A mismatch means the amount semantics are wrong somewhere, which
-   * would silently corrupt every pot-odds number downstream — so it is recorded
-   * loudly instead of being absorbed.
+   * returned. A mismatch means the accounting is wrong somewhere, which would
+   * silently corrupt every pot-odds number downstream.
+   *
+   * The check is deliberately two-sided. An earlier version only flagged
+   * `won > contributed`, and so stayed silent through a real ordering bug that
+   * dropped every blind and every pot award — the failure mode it existed to
+   * catch. A one-sided invariant is barely an invariant.
    */
   private verifyChipConservation(): void {
-    if (this.collected.length === 0) return;
     const contributed = this.potTotal();
     const won = this.collected.reduce((sum, entry) => sum + entry.amount, 0);
-    const drift = Math.abs(contributed - won);
-    // Tolerate a chip of rounding, and any rake, which the log does not itemise.
-    if (drift > Math.max(1, contributed * 0.001) && won > contributed) {
+    const hand = `hand #${this.handNumber ?? '?'}`;
+
+    // A contested hand always awards its pot to someone.
+    if (contributed > 0 && this.collected.length === 0) {
       this.diagnostics.push(
-        `Chip conservation: players contributed ${contributed} but ${won} was collected ` +
-          `(hand #${this.handNumber ?? '?'}).`,
+        `Chip conservation: ${contributed} was contributed in ${hand} but no pot was collected.`,
+      );
+      return;
+    }
+    if (contributed === 0 && won === 0) return;
+
+    // Winning more than was contributed is impossible.
+    if (won > contributed + Math.max(1, contributed * 0.001)) {
+      this.diagnostics.push(
+        `Chip conservation: players contributed ${contributed} but ${won} was collected in ${hand}.`,
+      );
+      return;
+    }
+    // The reverse is legal only up to rake, which the log never itemises.
+    const shortfall = contributed - won;
+    if (shortfall > Math.max(1, contributed * MAX_PLAUSIBLE_RAKE)) {
+      this.diagnostics.push(
+        `Chip conservation: ${contributed} contributed but only ${won} collected in ${hand} ` +
+          `(${shortfall} unaccounted for, beyond any plausible rake).`,
+      );
+    }
+  }
+
+  /** A hand that reached the end without blinds was assembled wrongly. */
+  private verifyHandStructure(): void {
+    if (this.players.size > 0 && this.bigBlind === 0 && this.potTotal() > 0) {
+      this.diagnostics.push(
+        `Structure: hand #${this.handNumber ?? '?'} recorded no big blind; ` +
+          'log lines may have been applied out of order.',
       );
     }
   }

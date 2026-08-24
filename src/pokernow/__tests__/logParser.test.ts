@@ -25,6 +25,31 @@ describe('hand framing lines', () => {
     expect(event.deadButton).toBe(false);
   });
 
+  it('reads the variant when it is written bare, as real logs do', () => {
+    // Transcribed from a live export: the variant sits outside any parens.
+    const real = parse(
+      '-- starting hand #1 (id: rbaf8zvefjfx)  No Limit Texas Hold\'em (dealer: "SB @ NUBYzQv6eS") --',
+      'handStart',
+    );
+    expect(real.variant).toBe('texas');
+    expect(real.handId).toBe('rbaf8zvefjfx');
+    expect(real.dealerId).toBe('NUBYzQv6eS');
+
+    const omaha = parse(
+      '-- starting hand #2 (id: abc)  Pot Limit Omaha Hi (dealer: "Bob @ b2c") --',
+      'handStart',
+    );
+    expect(omaha.variant).toBe('omaha');
+  });
+
+  it('does not mistake a player named after a game for the variant', () => {
+    const event = parse(
+      '-- starting hand #3 (id: abc)  No Limit Texas Hold\'em (dealer: "Omaha Joe @ x1y") --',
+      'handStart',
+    );
+    expect(event.variant).toBe('texas');
+  });
+
   it('recognises Omaha and dead-button hands', () => {
     const omaha = parse(
       '-- starting hand #3 (Pot Limit Omaha Hi) (dealer: "Bob @ b2c") --',
@@ -55,6 +80,13 @@ describe('hand framing lines', () => {
 describe('cards', () => {
   it('reads hero hole cards, including a ten', () => {
     expect(cardsToString(parse('Your hand is 10♥, K♦', 'heroCards').cards)).toBe('10♥ K♦');
+  });
+
+  it('reads streets whether or not they are capitalised', () => {
+    // Real logs capitalise them; the community parsers documented lower case.
+    expect(parse('Flop:  [A♥, 7♦, 2♣]', 'board').street).toBe('flop');
+    expect(parse('Turn: A♥, 7♦, 2♣ [K♥]', 'board').street).toBe('turn');
+    expect(parse('River: A♥, 7♦, 2♣, K♥ [Q♠]', 'board').street).toBe('river');
   });
 
   it('reads each street, keeping only the newly exposed cards', () => {
@@ -124,8 +156,22 @@ describe('betting lines', () => {
     });
   });
 
+  it('parses a showdown win, keeping the revealed hand', () => {
+    const event = parse(
+      '"SB @ NUBYzQv6eS" collected 990 from pot with Flush, Q High (combination: 2♥, 5♥, 9♥, J♥, Q♥)',
+      'collect',
+    );
+    expect(event.amount).toBe(990);
+    expect(event.handLabel).toBe('Flush, Q High');
+    // Kept in the order the log lists them, not re-sorted.
+    expect(cardsToString(event.combination ?? [])).toBe('2♥ 5♥ 9♥ J♥ Q♥');
+  });
+
   it('parses pot collection and uncalled bets', () => {
-    expect(parse('"Alice @ a1b" collected 615 from pot', 'collect').amount).toBe(615);
+    const plain = parse('"Alice @ a1b" collected 615 from pot', 'collect');
+    expect(plain.amount).toBe(615);
+    expect(plain.handLabel).toBeNull();
+    expect(plain.combination).toBeNull();
     expect(parse('Uncalled bet of 200 returned to "Alice @ a1b"', 'uncalledReturn')).toMatchObject({
       amount: 200,
       player: { id: 'a1b' },
@@ -146,6 +192,26 @@ describe('resilience', () => {
       id: 'x9z',
       name: 'a@b.com',
     });
+  });
+
+  it('reads the narrated table-management lines real logs use', () => {
+    // These are written "The player \"X\" …", not "\"X\" …".
+    expect(parse('The player "Gina @ g7h" joined the game with a stack of 400.', 'seatChange')).toMatchObject({
+      change: 'join',
+      stack: 400,
+      player: { id: 'g7h', name: 'Gina' },
+    });
+    expect(parse('The player "Gina @ g7h" quits the game with a stack of 0.', 'seatChange').change).toBe('quit');
+    expect(parse('The player "Gina @ g7h" stand up with the stack of 2220.', 'seatChange').change).toBe('standUp');
+    expect(parse('The player "Gina @ g7h" sit back with the stack of 2220.', 'seatChange').change).toBe('sitDown');
+  });
+
+  it('names inert table lines rather than dumping them in unknown', () => {
+    expect(parse('Dead Small Blind', 'tableNote').note).toBe('Dead Small Blind');
+    expect(parseLogMessage('The player "Gina @ g7h" requested a seat.').kind).toBe('tableNote');
+    expect(
+      parseLogMessage('The admin approved the player "Gina @ g7h" participation with a stack of 2000.').kind,
+    ).toBe('tableNote');
   });
 
   it('tracks seat changes without treating them as actions', () => {

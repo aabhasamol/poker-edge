@@ -288,6 +288,19 @@ only ever sent to your own seat's connection. A link alone is therefore not
 enough to follow a game from outside — the reader has to run in the browser tab
 that is seated at the table.
 
+### Ordering: why timestamps are not enough
+
+Log lines carry both a timestamp and an `order` sequence number, and only the
+latter is trustworthy. Timestamps are **not unique** — in a real 2,000-line log
+167 timestamps were shared by more than one line, and a hand's start, its seat
+roster and all of its blinds routinely land in the same millisecond.
+
+Sorting by timestamp leaves those lines in feed order, which is newest-first.
+That puts `handStart` *after* the blinds it should precede, so its reset
+discards them. Measured against a real 81-hand log, that single mistake left
+every hand with no blinds recorded, inflated contributions by 47%, and dropped
+every pot award.
+
 ### Trusting the numbers
 
 PokerNow reports bet amounts as a player's running total for the street
@@ -296,12 +309,19 @@ it is checked rather than assumed:
 
 - a call that lands below the current bet without being all-in is flagged as a
   likely increment-vs-total mismatch;
+- a completed hand with no big blind is flagged as mis-assembled;
 - at the end of every hand, total contributions are compared against the pots
-  collected.
+  collected, in **both** directions — winning more than was contributed is
+  impossible, and contributing more than was won is legal only up to rake.
 
-Both surface as `diagnostics` on the hand rather than being absorbed silently,
-because a wrong reading would corrupt every pot-odds number downstream while
-still looking plausible.
+The two-sidedness is not decoration. An earlier version only flagged
+`won > contributed` and so stayed completely silent through the ordering bug
+above — the exact failure it existed to catch. A one-sided invariant is barely
+an invariant.
+
+All of these surface as `diagnostics` on the hand rather than being absorbed
+silently, because a wrong reading would corrupt every pot-odds number
+downstream while still looking plausible.
 
 Unrecognised prose is never an error. It becomes an `unknown` event carrying
 its original text, so an upstream wording change degrades the tool instead of

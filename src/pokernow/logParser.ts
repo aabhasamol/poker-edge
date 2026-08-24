@@ -76,14 +76,27 @@ function parseHandStart(msg: string): PokerNowEvent | null {
   const handNumber = parseAmount(/#(\d+)/.exec(msg)?.[1]);
   const handId = /\(id:\s*([^)]+)\)/.exec(msg)?.[1]?.trim() ?? null;
 
-  // The variant sits in its own parenthesised group; pick the group that names
-  // a known game rather than relying on positional ordering, which varies.
+  // The dealer's display name is arbitrary text — a player called "Omaha Joe"
+  // would otherwise be read as the game type — so it is removed before any
+  // variant search rather than merely skipped by one of them.
+  const withoutDealer = msg.replace(/\(dealer:[^)]*\)/i, '');
+
+  // The variant may be parenthesised or bare. Real logs write it bare:
+  //   -- starting hand #1 (id: rbaf8z)  No Limit Texas Hold'em (dealer: "…") --
+  // so a parens-only search silently yields null and defaults the game to
+  // Hold'em — which would misread an Omaha table as Texas without complaint.
   let variantLabel: string | null = null;
-  for (const [, group] of msg.matchAll(/\(([^)]*)\)/g)) {
+  for (const [, group] of withoutDealer.matchAll(/\(([^)]*)\)/g)) {
     if (group && variantFromLabel(group) !== null) {
       variantLabel = group.trim();
       break;
     }
+  }
+  if (variantLabel === null) {
+    const bare = /(?:no limit|pot limit|fixed limit)?\s*(texas hold'?em|holdem|omaha(?:\s+hi)?)/i.exec(
+      withoutDealer,
+    );
+    if (bare) variantLabel = bare[0].trim();
   }
 
   const dealerInner = /\(dealer:\s*"(.+?)"\s*\)/.exec(msg)?.[1] ?? null;
@@ -232,12 +245,46 @@ function parseShow(player: PlayerRef, rest: string): PokerNowEvent | null {
   return cards ? { kind: 'show', player, cards } : null;
 }
 
-/** `collected 90 from pot` (one line per pot when there are side pots). */
+/**
+ * `collected 90 from pot`, optionally carrying the showdown result:
+ * `collected 990 from pot with Flush, Q High (combination: 2♥, 5♥, 9♥, J♥, Q♥)`
+ *
+ * The detail is kept because it reveals what a player actually held at
+ * showdown — the ground truth the bluff model has to be calibrated against.
+ * Note the combination is the best five cards, not the player's hole cards.
+ */
 function parseCollect(player: PlayerRef, rest: string): PokerNowEvent | null {
-  const match = /^collected ([\d.,]+) from pot/.exec(rest);
+  const match = /^collected ([\d.,]+) from pot(?: with ([^(]+?))?(?:\s*\(combination: ([^)]*)\))?\.?$/.exec(
+    rest,
+  );
   if (!match) return null;
   const amount = parseAmount(match[1]);
-  return amount === null ? null : { kind: 'collect', player, amount };
+  if (amount === null) return null;
+  return {
+    kind: 'collect',
+    player,
+    amount,
+    handLabel: match[2]?.trim() ?? null,
+    combination: match[3] ? parseCardList(match[3]) : null,
+  };
+}
+
+/**
+ * Lines that are recognised but change no state. Naming them keeps the
+ * `unknown` bucket meaningful as a to-do list rather than expected noise.
+ */
+const TABLE_NOTES: readonly RegExp[] = [
+  /^Dead Small Blind/i,
+  /^Dead Big Blind/i,
+  /^requested a seat/i,
+  /^participation with a stack of/i,
+];
+
+function parseTableNote(text: string): PokerNowEvent | null {
+  for (const test of TABLE_NOTES) {
+    if (test.test(text)) return { kind: 'tableNote', note: text };
+  }
+  return null;
 }
 
 const SEAT_CHANGES: readonly {
@@ -258,7 +305,21 @@ function parseSeatChange(player: PlayerRef, rest: string): PokerNowEvent | null 
   return null;
 }
 
-const PLAYER_MATCHERS = [parseBlind, parseAction, parseShow, parseCollect, parseSeatChange];
+const PLAYER_MATCHERS = [
+  parseBlind,
+  parseAction,
+  parseShow,
+  parseCollect,
+  parseSeatChange,
+  (_player: PlayerRef, rest: string) => parseTableNote(rest),
+];
+
+/**
+ * Player-prefixed lines come in two shapes: the terse `"Name @ id" folds` used
+ * for betting, and a narrated `The player "Name @ id" joined …` used for table
+ * management. Both carry the player in the same position.
+ */
+const NARRATED_PREFIX = /^The (?:player|admin approved the player)\s+"(.+?)"\s+(.*)$/;
 const TABLE_MATCHERS = [
   parseHandStart,
   parseHandEnd,
@@ -280,7 +341,7 @@ export function parseLogMessage(msg: string): PokerNowEvent {
     if (event) return event;
   }
 
-  const prefix = PLAYER_PREFIX.exec(text);
+  const prefix = PLAYER_PREFIX.exec(text) ?? NARRATED_PREFIX.exec(text);
   if (prefix) {
     const player = splitPlayer(prefix[1]!);
     if (player) {
@@ -291,6 +352,9 @@ export function parseLogMessage(msg: string): PokerNowEvent {
       }
     }
   }
+
+  const note = parseTableNote(text);
+  if (note) return note;
 
   return { kind: 'unknown', text };
 }

@@ -74,6 +74,7 @@ export function parseLogCsv(text: string): LogLine[] {
   const hasHeader = header.includes('entry');
   const entryIndex = hasHeader ? header.indexOf('entry') : 0;
   const atIndex = hasHeader ? header.indexOf('at') : 1;
+  const orderIndex = hasHeader ? header.indexOf('order') : -1;
 
   const lines: LogLine[] = [];
   for (const record of records.slice(hasHeader ? 1 : 0)) {
@@ -81,7 +82,9 @@ export function parseLogCsv(text: string): LogLine[] {
     const msg = fields[entryIndex];
     if (msg === undefined || msg.trim().length === 0) continue;
     const at = atIndex >= 0 ? fields[atIndex]?.trim() : undefined;
-    lines.push(at ? { msg, at } : { msg });
+    const rawOrder = orderIndex >= 0 ? Number(fields[orderIndex]?.trim()) : NaN;
+    const order = Number.isSafeInteger(rawOrder) ? rawOrder : undefined;
+    lines.push({ msg, ...(at ? { at } : {}), ...(order !== undefined ? { order } : {}) });
   }
   return lines;
 }

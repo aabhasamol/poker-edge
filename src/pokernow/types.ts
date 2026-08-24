@@ -33,6 +33,15 @@ export interface LogLine {
   readonly msg: string;
   /** ISO timestamp (`created_at`). Used to request only newer lines. */
   readonly at?: string;
+  /**
+   * Monotonic sequence number from the CSV export's `order` column.
+   *
+   * Timestamps are NOT unique — in real logs a hand's start, its seat roster
+   * and all its blinds routinely share one millisecond. Ordering by timestamp
+   * alone therefore scrambles those lines, and a scrambled `handStart` wipes
+   * the blinds that belong to the hand. This is the authoritative sequence.
+   */
+  readonly order?: number;
 }
 
 export type PokerNowEvent =
@@ -85,7 +94,15 @@ export type PokerNowEvent =
       readonly allIn: boolean;
     }
   | { readonly kind: 'show'; readonly player: PlayerRef; readonly cards: readonly Card[] }
-  | { readonly kind: 'collect'; readonly player: PlayerRef; readonly amount: number }
+  | {
+      readonly kind: 'collect';
+      readonly player: PlayerRef;
+      readonly amount: number;
+      /** e.g. "Flush, Q High" when the pot went to showdown. */
+      readonly handLabel: string | null;
+      /** The winning five cards, when the log names them. */
+      readonly combination: readonly Card[] | null;
+    }
   | { readonly kind: 'uncalledReturn'; readonly player: PlayerRef; readonly amount: number }
   | {
       readonly kind: 'seatChange';
@@ -93,6 +110,8 @@ export type PokerNowEvent =
       readonly change: 'join' | 'quit' | 'sitDown' | 'standUp';
       readonly stack: number | null;
     }
+  /** A recognised line that carries no state, e.g. "Dead Small Blind". */
+  | { readonly kind: 'tableNote'; readonly note: string }
   | { readonly kind: 'unknown'; readonly text: string };
 
 /** A parsed event together with the line it came from. */

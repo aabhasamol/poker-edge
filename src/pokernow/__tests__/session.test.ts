@@ -31,6 +31,28 @@ describe('feed ordering and de-duplication', () => {
     expect(update.current.diagnostics).toEqual([]);
   });
 
+  it('sequences by order, not timestamp, when a hand shares one millisecond', () => {
+    // The regression this guards: the hand preamble (start, seats, blinds) all
+    // carries one timestamp. Sorting by timestamp leaves it newest-first, so
+    // handStart lands after the blinds and its reset discards them.
+    const session = new LogSession({ heroName: 'Alice' });
+    const update = session.ingest(AS_SERVED);
+    const hand = update.completed[0]!;
+
+    expect(hand.bigBlind).toBe(10);
+    expect(hand.smallBlind).toBe(5);
+    expect(hand.players).toHaveLength(6);
+    expect(hand.players.reduce((sum, p) => sum + p.committedTotal, 0)).toBe(615);
+    expect(hand.diagnostics).toEqual([]);
+  });
+
+  it('de-duplicates on the sequence number when the feed provides one', () => {
+    const session = new LogSession();
+    session.ingest(AS_SERVED);
+    const second = session.ingest(AS_SERVED);
+    expect(second.applied).toBe(0);
+  });
+
   it('advances the cursor to the newest line consumed', () => {
     const session = new LogSession();
     session.ingest(AS_SERVED);

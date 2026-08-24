@@ -151,6 +151,114 @@ describe('accounting safeguards', () => {
     expect(tracker.snapshot().diagnostics.join(' ')).toContain('Chip conservation');
   });
 
+  it('flags a contested hand that awarded no pot', () => {
+    // The shape of a real ordering bug: chips go in, nothing comes out.
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #1  No Limit Texas Hold\'em (dealer: "Alice @ a1b") --',
+      'Player stacks: #1 "Alice @ a1b" (500) | #2 "Bob @ b2c" (500)',
+      '"Alice @ a1b" posts a small blind of 5',
+      '"Bob @ b2c" posts a big blind of 10',
+      '"Alice @ a1b" folds',
+      '-- ending hand #1 --',
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    expect(tracker.snapshot().diagnostics.join(' ')).toContain('no pot was collected');
+  });
+
+  it('flags a shortfall too large to be rake', () => {
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #1  No Limit Texas Hold\'em (dealer: "Alice @ a1b") --',
+      'Player stacks: #1 "Alice @ a1b" (500) | #2 "Bob @ b2c" (500)',
+      '"Alice @ a1b" posts a small blind of 5',
+      '"Bob @ b2c" posts a big blind of 10',
+      '"Alice @ a1b" folds',
+      '"Bob @ b2c" collected 5 from pot',
+      '-- ending hand #1 --',
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    expect(tracker.snapshot().diagnostics.join(' ')).toContain('unaccounted for');
+  });
+
+  it('accepts a small shortfall as rake', () => {
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #1  No Limit Texas Hold\'em (dealer: "Alice @ a1b") --',
+      'Player stacks: #1 "Alice @ a1b" (500) | #2 "Bob @ b2c" (500)',
+      '"Alice @ a1b" posts a small blind of 100',
+      '"Bob @ b2c" posts a big blind of 100',
+      '"Alice @ a1b" folds',
+      '"Bob @ b2c" collected 195 from pot',
+      '-- ending hand #1 --',
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    expect(tracker.snapshot().diagnostics).toEqual([]);
+  });
+
+  it('flags a completed hand that recorded no blinds', () => {
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #1  No Limit Texas Hold\'em (dealer: "Alice @ a1b") --',
+      'Player stacks: #1 "Alice @ a1b" (500) | #2 "Bob @ b2c" (500)',
+      '"Alice @ a1b" bets 50',
+      '"Bob @ b2c" folds',
+      '"Alice @ a1b" collected 50 from pot',
+      '-- ending hand #1 --',
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    expect(tracker.snapshot().diagnostics.join(' ')).toContain('recorded no big blind');
+  });
+
+  it('charges a duplicated missing blind only once', () => {
+    // Transcribed from a real hand: the small blind also posted a "missing"
+    // small blind, but the stacks afterwards show only one was taken.
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #50  No Limit Texas Hold\'em (dealer: "Grondo20 @ g4h") --',
+      'Player stacks: #1 "Darknight @ d1e" (3630) | #4 "Grondo20 @ g4h" (2300) | #10 "Swagat @ s10" (1610)',
+      '"Swagat @ s10" posts a small blind of 10',
+      '"Darknight @ d1e" posts a big blind of 20',
+      '"Swagat @ s10" posts a missing small blind of 10',
+      '"Swagat @ s10" posts a missed big blind of 20',
+      '"Grondo20 @ g4h" calls 20',
+      '"Swagat @ s10" checks',
+      '"Darknight @ d1e" checks',
+      'Flop:  [7♣, 2♥, A♣]',
+      '"Swagat @ s10" checks',
+      '"Darknight @ d1e" bets 70',
+      '"Grondo20 @ g4h" folds',
+      '"Swagat @ s10" folds',
+      'Uncalled bet of 70 returned to "Darknight @ d1e"',
+      '"Darknight @ d1e" collected 70 from pot',
+      '-- ending hand #50 --',
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    const hand = tracker.snapshot();
+    expect(findPlayer(hand, 's10')?.committedTotal).toBe(30);
+    expect(hand.players.reduce((sum, p) => sum + p.committedTotal, 0)).toBe(70);
+    expect(hand.diagnostics).toEqual([]);
+  });
+
+  it('still charges a missing blind of a kind not already posted live', () => {
+    const tracker = new HandTracker();
+    for (const msg of [
+      '-- starting hand #55  No Limit Texas Hold\'em (dealer: "Darknight @ d1e") --',
+      'Player stacks: #1 "Darknight @ d1e" (4500) | #2 "SB @ s2b" (2460)',
+      '"Darknight @ d1e" posts a small blind of 10',
+      '"SB @ s2b" posts a big blind of 20',
+      '"SB @ s2b" posts a missing small blind of 10',
+    ]) {
+      tracker.apply(parseLogMessage(msg));
+    }
+    expect(findPlayer(tracker.snapshot(), 's2b')?.committedTotal).toBe(30);
+  });
+
   it('keeps extra runs off the main board', () => {
     const tracker = new HandTracker();
     for (const msg of [

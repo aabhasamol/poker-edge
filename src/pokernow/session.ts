@@ -33,17 +33,26 @@ export interface SessionUpdate {
 }
 
 /**
- * Sort log lines oldest-first. Timestamps are ISO-8601 and therefore sort
- * correctly as strings. Lines without a timestamp keep their relative order.
+ * Sort log lines oldest-first.
+ *
+ * `order` wins when both lines carry it, because timestamps are not unique:
+ * in real logs the start of a hand, its seat roster and every blind commonly
+ * share a single millisecond. Sorting those by timestamp leaves them in feed
+ * order — newest first — which puts `handStart` AFTER the blinds it should
+ * precede, and the reset then discards them.
  */
 export function orderLogLines(lines: readonly LogLine[]): LogLine[] {
   return [...lines]
     .map((line, index) => ({ line, index }))
     .sort((a, b) => {
+      const ao = a.line.order;
+      const bo = b.line.order;
+      if (ao !== undefined && bo !== undefined) {
+        return ao !== bo ? ao - bo : a.index - b.index;
+      }
       const at = a.line.at;
       const bt = b.line.at;
       if (at && bt && at !== bt) return at < bt ? -1 : 1;
-      if (at && bt) return a.index - b.index;
       return a.index - b.index;
     })
     .map((entry) => entry.line);
@@ -58,6 +67,8 @@ export class LogSession {
   /** Newest timestamp consumed, and the messages seen at exactly that instant. */
   private lastAt: string | null = null;
   private seenAtBoundary = new Set<string>();
+  /** Sequence numbers already applied, when the feed provides them. */
+  private readonly seenOrders = new Set<number>();
 
   constructor(options: SessionOptions = {}) {
     this.heroIdValue = options.heroId ?? null;
@@ -97,6 +108,14 @@ export class LogSession {
 
   /** De-duplicate against the inclusive `after_at` boundary. */
   private accept(line: LogLine): boolean {
+    // A sequence number identifies a line exactly; prefer it when present.
+    if (line.order !== undefined) {
+      if (this.seenOrders.has(line.order)) return false;
+      this.seenOrders.add(line.order);
+      if (line.at && (this.lastAt === null || line.at > this.lastAt)) this.lastAt = line.at;
+      return true;
+    }
+
     const at = line.at;
     if (!at) return true;
     if (this.lastAt === null || at > this.lastAt) {
