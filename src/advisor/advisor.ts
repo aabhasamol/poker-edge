@@ -226,6 +226,12 @@ export function advise(
       heroActsLast(hand, heroId),
       opponents.map((entry) => hasVoluntarilyEntered(hand, entry.player.id)),
       countAggressors(hand, heroId),
+      heroCommitted,
+      opponents.map((entry) => ({
+        committedStreet: entry.player.committedStreet,
+        stack: entry.player.stack,
+      })),
+      option.amount >= heroStack,
     );
     choices.push({
       action: 'raise',
@@ -422,17 +428,40 @@ function evaluateRaise(
   hasEntered: readonly boolean[],
   /** How many opponents had already bet or raised before hero's raise. */
   priorAggressors: number,
+  /** Hero's own commitment on this street, before raising. */
+  heroCommitted: number,
+  /** Each opponent's commitment and remaining stack, aligned with `ranges`. */
+  seats: readonly { committedStreet: number; stack: number }[],
+  /** True when hero's raise is all-in, so nothing can be bet after it. */
+  noFurtherBetting: boolean,
 ): RaiseEvaluation {
   if (ranges.length === 0) {
     return { ev: pot, foldProbability: 1, equityWhenCalled: 1, reRaiseProbability: 0, realization: 1 };
   }
 
-  const price = raise / (pot + raise);
+  /*
+   * Fold equity has to be priced from the OPPONENT's seat, not hero's.
+   *
+   * `raise / (pot + raise)` describes how big hero's bet is. It says nothing
+   * about the decision the opponent faces, because it ignores what they have
+   * already put in. Someone who has committed 957 into a 997 pot is being
+   * offered better than 3 to 1 to call another 1023 — they are not folding
+   * three quarters of the time, whatever hero's sizing looks like. Using
+   * hero's number credited an all-in bluff with 76% folds and produced a
+   * +464 recommendation to shove J-8 suited at 39% equity.
+   */
+  const potAfterRaise = pot + raise;
+  const heroTotal = heroCommitted + raise;
+
   const split = ranges.map((range, index) => {
     // An all-in player sees every card regardless of what hero does.
     if (canFold[index] === false) {
       return { continuing: range, foldProbability: 0, reRaiseProbability: 0 };
     }
+    const seat = seats[index];
+    const owed = seat ? Math.min(Math.max(0, heroTotal - seat.committedStreet), seat.stack) : raise;
+    const price = owed > 0 ? owed / (potAfterRaise + owed) : 0;
+
     return splitByPrice(
       range,
       state,
@@ -441,14 +470,22 @@ function evaluateRaise(
       hand,
       hasEntered[index] ?? true,
       priorAggressors,
+      noFurtherBetting,
     );
   });
 
   const foldProbability = split.reduce((product, part) => product * part.foldProbability, 1);
   const continuing = split.map((part) => part.continuing);
 
+  // Equity conditional on somebody continuing, weighting each opponent by how
+  // often they actually do rather than treating them all as permanent.
+  const participation = split.map((part) => 1 - part.foldProbability);
   const contested = continuing.every((range) => !range.isEmpty())
-    ? computeRangeEquity(state, continuing, sampling)
+    ? computeRangeEquity(state, continuing, {
+        ...sampling,
+        participation,
+        requireAtLeastOne: true,
+      })
     : null;
   const rawEquity = contested?.impossible === false ? contested.equity : 0;
 
@@ -461,8 +498,19 @@ function evaluateRaise(
     1 - split.reduce((product, part) => product * (1 - part.reRaiseProbability), 1);
   const flatCallProbability = Math.max(0, 1 - foldProbability - reRaiseProbability);
 
+  /*
+   * What a caller adds is what they still OWE, not a second copy of hero's
+   * raise. Someone who already has 60 in calls a raise to 165 by adding 105.
+   * Assuming they match the full amount inflates the pot hero is playing for.
+   */
+  const expectedCalled = split.reduce((sum, part, index) => {
+    const seat = seats[index];
+    const owed = seat ? Math.min(Math.max(0, heroTotal - seat.committedStreet), seat.stack) : raise;
+    return sum + (1 - part.foldProbability) * owed;
+  }, 0);
+  const contestedPot = pot + raise + expectedCalled;
+
   const wonOutright = foldProbability * pot;
-  const contestedPot = pot + 2 * raise;
   const whenCalled = flatCallProbability * (equityWhenCalled * contestedPot - raise);
 
   /*
@@ -470,7 +518,8 @@ function evaluateRaise(
    * the maximum rather than always folding keeps strong hands from being
    * punished for the same branch that correctly punishes junk.
    */
-  const reRaised = reRaiseProbability * Math.max(-raise, equityWhenCalled * (pot + 4 * raise) - 2 * raise);
+  const reRaised =
+    reRaiseProbability * Math.max(-raise, equityWhenCalled * (contestedPot + 2 * raise) - 2 * raise);
 
   return {
     ev: wonOutright + whenCalled + reRaised,
@@ -499,24 +548,32 @@ function splitByPrice(
   hand: LiveHand,
   hasEntered: boolean,
   priorAggressors: number,
+  noFurtherBetting: boolean,
 ): { continuing: Range; foldProbability: number; reRaiseProbability: number } {
   const percentiles = strengthOrder(range, state.board, hand);
 
   /*
-   * Someone who has not voluntarily put a chip in needs more than the raw price
-   * to continue, and how much more depends on what they are walking into.
+   * `price` is the pot odds the opponent is actually being offered, so by that
+   * alone they continue whenever their equity beats it. But equity has to be
+   * REALISED, and a caller realises less than their share: out of position,
+   * without the initiative, facing more decisions they can get them wrong.
    *
-   * Against a lone raiser they are merely first in — the blinds defend a button
-   * open fairly wide. Against a raise AND a re-raise they would be cold-calling
-   * a pot two players have already contested, which is a different question
-   * entirely. Priced on the odds alone the blinds cold-called 3-bets a quarter
-   * of the time with random cards, enough to make raising AK look unprofitable;
-   * priced with a flat penalty they folded 97% to a simple steal, which made
-   * raising 72o look free. The penalty has to scale with the aggression.
+   * The exception is when nothing can be bet afterwards. Calling an all-in has
+   * no future decisions to misplay, so equity is realised in full — which is
+   * why a pot-committed player calls a shove far wider than they would call a
+   * bet of the same price with money still behind.
+   */
+  const realisation = noFurtherBetting ? 1 : 0.35 + 0.3 * tendencies.stickiness;
+
+  /*
+   * Someone who has not voluntarily put a chip in needs more still, and how
+   * much more depends on what they are walking into. Against a lone raiser they
+   * are merely first in; against a raise AND a re-raise they would be
+   * cold-calling a pot two players have already contested.
    */
   const cold = !hasEntered && state.board.length < 3;
   const coldPenalty = cold ? 1 + 0.35 * priorAggressors : 1;
-  const threshold = clamp(price * (1.7 - tendencies.stickiness) * coldPenalty, 0, 0.97);
+  const threshold = clamp((price / realisation) * coldPenalty, 0, 0.97);
 
   /*
    * Which holdings come back over the top.
@@ -548,10 +605,23 @@ function splitByPrice(
     return keep;
   });
 
+  /*
+   * Holding a premium hand is not the same as re-raising with it — most strong
+   * hands just call, and a player who has already raised once re-raises rarely
+   * whatever their range looks like.
+   *
+   * Without a ceiling the arithmetic runs away: a premium holding is half of a
+   * 12% opening range, so the model had an early-position opener coming back
+   * over the top 48% of the time, which made three-betting AK unprofitable
+   * against a single raise.
+   */
+  const ceiling = Math.min(0.35, (tendencies.threeBetPercent / 100) * 2);
+  const rawReRaise = total > 0 ? reRaising / total : 0;
+
   return {
     continuing,
     foldProbability: total > 0 ? folding / total : 1,
-    reRaiseProbability: total > 0 ? reRaising / total : 0,
+    reRaiseProbability: Math.min(rawReRaise, ceiling),
   };
 }
 

@@ -37,6 +37,18 @@ export interface RangeEquityOptions {
   readonly seed?: number;
   /** Give up after this many consecutive collisions on one trial. */
   readonly maxAttemptsPerTrial?: number;
+  /**
+   * Probability each opponent is actually in the hand, aligned with `ranges`.
+   *
+   * Without this, equity is computed as though EVERY opponent contests the pot
+   * at once. That is right at showdown and wrong when asking "what if my raise
+   * gets called": two blinds who continue 5% of the time were being treated as
+   * permanent opponents, which crushed hero's equity in every multiway spot
+   * and made three-betting AK look unprofitable.
+   */
+  readonly participation?: readonly number[];
+  /** Condition on at least one opponent being in; used with `participation`. */
+  readonly requireAtLeastOne?: boolean;
 }
 
 export interface RangeEquityResult {
@@ -129,15 +141,33 @@ export function computeRangeEquity(
   let attempts = 0;
 
   const opponentHoles: Card[][] = tables.map(() => []);
+  const participation = options.participation;
 
   while (taken < samples) {
     attempts++;
     if (attempts > samples * maxAttempts) break;
 
-    // --- Draw one hand per opponent, independently, and reject collisions ---
+    // --- Decide who is actually in this trial ---
+    const present: number[] = [];
+    for (let i = 0; i < tables.length; i++) {
+      const chance = participation?.[i] ?? 1;
+      if (chance >= 1 || rng.next() < chance) present.push(i);
+    }
+    // Conditioning on someone continuing: a trial where everyone folds says
+    // nothing about how hero fares when called.
+    if (present.length === 0) {
+      if (options.requireAtLeastOne) continue;
+      win++;
+      shareTotal += 1;
+      shareSquares += 1;
+      taken++;
+      continue;
+    }
+
+    // --- Draw one hand per present opponent, and reject collisions ---
     const used = new Set<number>(known.map(cardId));
     let collided = false;
-    for (let i = 0; i < tables.length; i++) {
+    for (const i of present) {
       const table = tables[i]!;
       const combo = comboFromIndex(draw(table, rng.next() * table.total));
       if (used.has(combo.low) || used.has(combo.high)) {
@@ -151,7 +181,7 @@ export function computeRangeEquity(
     if (collided) continue;
 
     // --- Complete the board from what is left ---
-    const deck = remainingDeck([...known, ...opponentHoles.flat()]);
+    const deck = remainingDeck([...known, ...present.flatMap((i) => opponentHoles[i]!)]);
     const board = [...state.board];
     for (let i = 0; i < boardSlots; i++) {
       const pick = rng.nextInt(deck.length - i);
@@ -167,8 +197,8 @@ export function computeRangeEquity(
 
     let better = 0;
     let equal = 0;
-    for (const hole of opponentHoles) {
-      const score = bestScore(variant, hole, board);
+    for (const i of present) {
+      const score = bestScore(variant, opponentHoles[i]!, board);
       if (score === null) continue;
       if (score > heroScore) {
         better++;

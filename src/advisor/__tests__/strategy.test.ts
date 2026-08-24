@@ -12,6 +12,14 @@ function facingOpen(hole: string) {
   );
 }
 
+/** Folded around to hero on the button, both blinds still to act. */
+function stealSpot(hole: string) {
+  return situation(
+    sixHanded(hole, ['"Cal @ cal" folds', '"Dee @ dee" folds', '"Eli @ eli" folds']),
+    'hero',
+  );
+}
+
 function headsUp(hole: string) {
   return situation(
     sixHanded(hole, [
@@ -31,12 +39,17 @@ function adviseWith(spot: ReturnType<typeof facingOpen>, strategy = TIGHT) {
 
 describe('playing tighter', () => {
   it('declines a thin edge that a loose profile would take', () => {
-    const spot = facingOpen('Jc 8d');
+    // Folded to hero on the button with K-9 offsuit: opening shows a real but
+    // small profit, the kind that sits inside the estimate's own error.
+    const spot = stealSpot('Ks 9d');
     const loose = adviseWith(spot, LOOSE);
     const tight = adviseWith(spot, TIGHT);
 
     const bestEv = Math.max(...loose.options.map((o) => o.ev));
-    expect(bestEv).toBeGreaterThan(0); // genuinely positive, just small
+    expect(bestEv).toBeGreaterThan(0);
+    expect(bestEv).toBeLessThan(TIGHT.requiredEdgeBB * 20);
+
+    expect(loose.recommendation).not.toBe('fold');
     expect(tight.recommendation).toBe('fold');
   });
 

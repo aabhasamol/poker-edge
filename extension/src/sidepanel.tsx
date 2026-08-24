@@ -88,6 +88,23 @@ function Panel() {
 
       {status === null && <NoReader />}
 
+      {status?.state === 'error' && (
+        <section className="card">
+          <h3 className="card-title">The reader stopped getting data</h3>
+          <p className="faint">{status.detail ?? 'Repeated failed reads from the table.'}</p>
+          <p className="faint">
+            Usually the game ended or the tab was left. Reload the PokerNow tab to reattach.
+          </p>
+          <button
+            type="button"
+            className="text-button"
+            onClick={() => void chrome.runtime.sendMessage({ type: 'reinject' })}
+          >
+            Reconnect to the table
+          </button>
+        </section>
+      )}
+
       {heroId === null && hand !== null && (
         <HeroPrompt
           guess={heroNameGuess}

@@ -390,6 +390,29 @@ Mixed lines are drawn deterministically from the decision, not the moment. A
 recommendation that flickered between raise and call while you were deciding
 would be unusable.
 
+### Pricing a raise from the other seat
+
+Three errors of the same kind lived in the raise model, each flattering it:
+
+- **Fold equity was priced by hero's sizing**, `raise / (pot + raise)`, which
+  says how big the bet is and nothing about the decision facing the opponent.
+  Someone who has committed 957 into a 997 pot is being offered better than
+  3 to 1 to call another 1023 — they do not fold three quarters of the time,
+  whatever hero's sizing looks like. It priced them as folding 76% and
+  recommended shoving J-8 suited at 39% equity for +464.
+- **Equity when called assumed everyone calls.** Two blinds who continue 5% of
+  the time were treated as permanent opponents, crushing hero's equity in every
+  multiway pot. Continuation is now sampled per opponent, conditional on
+  somebody being in.
+- **The contested pot assumed callers match hero's full raise.** Someone with
+  60 already in calls a raise to 165 by adding 105, not 165.
+
+Equity realisation is applied where it belongs: a caller collects less than
+their share, being out of position without the initiative — unless nothing can
+be bet afterwards. Calling an all-in has no future decisions to misplay, which
+is why a pot-committed player calls a shove far wider than a bet of the same
+price with money still behind.
+
 ### What the advisor will not tell you
 
 Expected values are in chips, relative to folding now; chips already in the pot

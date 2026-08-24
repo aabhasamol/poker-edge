@@ -219,6 +219,46 @@ describe('only legal actions', () => {
   });
 });
 
+describe('fold equity is priced from the opponent\'s seat', () => {
+  /** Hero in the big blind facing a raise of `to`, holding a weak hand. */
+  function facingRaiseOf(to: number) {
+    return situation(
+      [
+        '-- starting hand #2 (id: h2)  No Limit Texas Hold\'em (dealer: "Villain @ vil") --',
+        'Player stacks: #1 "Hero @ hero" (2000) | #2 "Villain @ vil" (4000)',
+        '"Villain @ vil" posts a small blind of 10',
+        '"Hero @ hero" posts a big blind of 20',
+        'Your hand is 8♦, J♦',
+        `"Villain @ vil" raises to ${to}`,
+      ],
+      'hero',
+    );
+  }
+
+  function foldEquityIn(spot: ReturnType<typeof facingRaiseOf>): number {
+    const advice = advise(spot.hand, 'hero', spot.state, FAST);
+    const raise = advice.options.find((o) => o.action === 'raise');
+    return raise ? Number(/fold (\d+)%/.exec(raise.basis)![1]) : 0;
+  }
+
+  it('credits far less fold equity against someone already committed', () => {
+    // The regression: pricing the raise by hero's sizing rather than by what
+    // the opponent must pay credited an all-in bluff with 76% folds and
+    // recommended shoving J-8 suited at 39% equity for +464.
+    const barelyIn = foldEquityIn(facingRaiseOf(60));
+    const potCommitted = foldEquityIn(facingRaiseOf(977));
+    expect(potCommitted).toBeLessThan(barelyIn);
+    expect(potCommitted).toBeLessThan(50);
+  });
+
+  it('does not shove a weak hand at someone who cannot fold profitably', () => {
+    const spot = facingRaiseOf(977);
+    const advice = advise(spot.hand, 'hero', spot.state, FAST);
+    expect(advice.recommendation).toBe('fold');
+    expect(advice.options.find((o) => o.action === 'raise')!.ev).toBeLessThan(0);
+  });
+});
+
 describe('honesty about the model', () => {
   it('labels post-flop advice as resting on heuristics', () => {
     const { hand, state } = situation(

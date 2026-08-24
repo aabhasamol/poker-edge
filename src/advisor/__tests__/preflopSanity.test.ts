@@ -42,9 +42,13 @@ describe('stealing the blinds', () => {
   });
 
   it('does open hands worth playing', () => {
+    // A strong hand may be flat-called as a deliberate trap, so the test is
+    // that raising leads the mix, not that this particular draw came up raise.
     for (const playable of ['As Ks', 'Ts Th', 'Ks Ts', 'Ad Jc']) {
       const advice = adviceFor(stealSpot(playable));
-      expect(advice.recommendation, `should open ${playable}`).toBe('raise');
+      expect(advice.recommendation, `should not fold ${playable}`).not.toBe('fold');
+      const best = advice.options[0]!;
+      expect(best.action, `raising should lead for ${playable}`).toBe('raise');
     }
   });
 
