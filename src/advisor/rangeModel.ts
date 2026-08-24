@@ -102,14 +102,14 @@ function preflopRange(
       .some((a) => a.action === 'raise' || a.action === 'bet');
 
   if (raised.length > 0 && facedVoluntaryRaise) {
-    reasoning.push(`Re-raised pre-flop: top ${tendencies.threeBetPercent}% of hands.`);
+    reasoning.push(`Re-raised pre-flop: top ${tendencies.threeBetPercent.toFixed(1)}% of hands.`);
     return Range.topPercent(tendencies.threeBetPercent);
   }
 
   if (raised.length > 0) {
     const percent = openPercentFor(position, tendencies);
     reasoning.push(
-      `Opened for a raise${position ? ` from ${position}` : ''}: top ${percent}% of hands.`,
+      `Opened for a raise${position ? ` from ${position}` : ''}: top ${percent.toFixed(1)}% of hands.`,
     );
     return Range.topPercent(percent);
   }
@@ -122,8 +122,8 @@ function preflopRange(
     const percent = facedRaise ? tendencies.coldCallPercent : tendencies.limpPercent;
     reasoning.push(
       facedRaise
-        ? `Called a raise: top ${percent}% of hands, minus the strongest, which would usually re-raise.`
-        : `Entered for the minimum: top ${percent}% of hands.`,
+        ? `Called a raise: top ${percent.toFixed(1)}% of hands, minus the strongest, which would usually re-raise.`
+        : `Entered for the minimum: top ${percent.toFixed(1)}% of hands.`,
     );
     // A caller rarely holds the very top of their range — those re-raise.
     const capped = Range.topPercent(percent).reweight((index, weight) => {
@@ -244,18 +244,33 @@ function logistic(x: number, midpoint: number, slope: number): number {
   return 1 / (1 + Math.exp(-(x - midpoint) / slope));
 }
 
-/** Model every opponent still contesting the pot, in seat order. */
+/** How a particular player is assumed to behave. */
+export type TendenciesLookup = (playerId: string) => Tendencies;
+
+export const DEFAULT_TENDENCIES: TendenciesLookup = () => POOL_DEFAULTS;
+
+/**
+ * Model every opponent still contesting the pot, in seat order.
+ *
+ * Each is modelled with THEIR OWN tendencies. Applying one shared assumption to
+ * the whole table — which is what this did before profiles existed — reads a
+ * player who enters 8% of hands and one who enters 80% as the same person.
+ */
 export function modelAllOpponents(
   hand: LiveHand,
   heroId: string,
   state: GameState,
-  tendencies: Tendencies = POOL_DEFAULTS,
-): { player: PlayerState; explanation: RangeExplanation }[] {
+  tendenciesFor: TendenciesLookup = DEFAULT_TENDENCIES,
+): { player: PlayerState; explanation: RangeExplanation; tendencies: Tendencies }[] {
   const known = [...state.hole, ...state.board];
   return hand.players
     .filter((player) => player.status !== 'folded' && player.id !== heroId)
-    .map((player) => ({
-      player,
-      explanation: modelOpponentRange(hand, player, known, tendencies),
-    }));
+    .map((player) => {
+      const tendencies = tendenciesFor(player.id);
+      return {
+        player,
+        explanation: modelOpponentRange(hand, player, known, tendencies),
+        tendencies,
+      };
+    });
 }

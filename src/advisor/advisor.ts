@@ -23,7 +23,7 @@ import { Range } from '../range/range';
 import { computeRangeEquity, RangeEquityResult } from '../range/rangeEquity';
 import { bestScore, getVariant } from '../engine/variant';
 import { Card } from '../engine/card';
-import { modelAllOpponents, RangeExplanation } from './rangeModel';
+import { DEFAULT_TENDENCIES, modelAllOpponents, RangeExplanation, TendenciesLookup } from './rangeModel';
 import {
   addTrap,
   MixedOption,
@@ -79,6 +79,8 @@ const ACTION_NOUN: Record<AdviceAction, string> = {
 };
 
 export interface AdviceOptions {
+  /** Per-player behaviour, from profiles. Falls back to population priors. */
+  readonly tendenciesFor?: TendenciesLookup;
   readonly tendencies?: Tendencies;
   readonly samples?: number;
   readonly seed?: number;
@@ -99,11 +101,14 @@ export function advise(
   state: GameState,
   options: AdviceOptions = {},
 ): Advice {
-  const tendencies = options.tendencies ?? POOL_DEFAULTS;
+  // An explicit single `tendencies` still works and applies to everyone; a
+  // lookup is what profiles supply.
+  const tendenciesFor: TendenciesLookup =
+    options.tendenciesFor ?? (options.tendencies ? () => options.tendencies! : DEFAULT_TENDENCIES);
   const samples = options.samples ?? 20_000;
   const seed = options.seed ?? 0x0dd5;
 
-  const opponents = modelAllOpponents(hand, heroId, state, tendencies);
+  const opponents = modelAllOpponents(hand, heroId, state, tendenciesFor);
   const ranges = opponents.map((entry) => entry.explanation.range);
   const caveats: string[] = [];
 
@@ -215,7 +220,7 @@ export function advise(
       pot,
       option.amount,
       { samples: Math.min(samples, 8_000), seed },
-      tendencies,
+      opponents.map((entry) => entry.tendencies),
       hand,
       opponents.map((entry) => entry.player.status !== 'allIn' && entry.player.stack > 0),
       heroActsLast(hand, heroId),
@@ -406,7 +411,8 @@ function evaluateRaise(
   pot: number,
   raise: number,
   sampling: { samples: number; seed: number },
-  tendencies: Tendencies,
+  /** One entry per opponent, aligned with `ranges`. */
+  perOpponent: readonly Tendencies[],
   hand: LiveHand,
   /** Whether each opponent is able to fold at all; all-in players are not. */
   canFold: readonly boolean[],
@@ -427,7 +433,15 @@ function evaluateRaise(
     if (canFold[index] === false) {
       return { continuing: range, foldProbability: 0, reRaiseProbability: 0 };
     }
-    return splitByPrice(range, state, price, tendencies, hand, hasEntered[index] ?? true, priorAggressors);
+    return splitByPrice(
+      range,
+      state,
+      price,
+      perOpponent[index] ?? POOL_DEFAULTS,
+      hand,
+      hasEntered[index] ?? true,
+      priorAggressors,
+    );
   });
 
   const foldProbability = split.reduce((product, part) => product * part.foldProbability, 1);
