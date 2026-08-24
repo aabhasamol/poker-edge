@@ -100,9 +100,19 @@ export interface PlayerProfile {
 /** Build a profile from what has been seen and what you have said. */
 export function buildProfile(observation: PlayerObservation, tag: PlayerTag): PlayerProfile {
   const priors = PRIORS[tag];
+  const vpip = estimateRate(observation.vpip, priors.vpip);
+
+  /*
+   * Raising pre-flop is a subset of entering the pot, so the raise rate cannot
+   * exceed the entry rate. Estimated independently they can: each is shrunk
+   * toward its own prior with its own strength, which put one player at 78%
+   * PFR against 76% VPIP — arithmetically explicable and plainly impossible.
+   * Downstream this matters, because "entered without raising" is derived by
+   * subtracting one from the other and would go negative.
+   */
   const estimates = {
-    vpip: estimateRate(observation.vpip, priors.vpip),
-    pfr: estimateRate(observation.pfr, priors.pfr),
+    vpip,
+    pfr: capAt(estimateRate(observation.pfr, priors.pfr), vpip.rate),
     threeBet: estimateRate(observation.threeBet, priors.threeBet),
     cBet: estimateRate(observation.cBet, priors.cBet),
     foldToCBet: estimateRate(observation.foldToCBet, priors.foldToCBet),
@@ -193,6 +203,17 @@ function toTendencies(
     bluffFrequency: aggressionFactor === null
       ? POOL_DEFAULTS.bluffFrequency
       : clamp(0.12 + 0.12 * aggressionFactor, 0.05, 0.6),
+  };
+}
+
+/** Hold an estimate below a ceiling, keeping its interval consistent. */
+function capAt(estimate: Estimate, ceiling: number): Estimate {
+  if (estimate.rate <= ceiling) return estimate;
+  return {
+    ...estimate,
+    rate: ceiling,
+    low: Math.min(estimate.low, ceiling),
+    high: Math.min(estimate.high, ceiling),
   };
 }
 

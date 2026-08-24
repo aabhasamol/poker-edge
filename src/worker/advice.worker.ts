@@ -9,7 +9,9 @@
  */
 
 import { Advice, advise, AdviceOptions } from '../advisor/advisor';
+import { Tendencies } from '../advisor/tendencies';
 import { GameState } from '../engine/gameState';
+import { POOL_DEFAULTS } from '../advisor/tendencies';
 import { LiveHand } from '../pokernow/handState';
 
 export interface AdviceRequest {
@@ -18,6 +20,11 @@ export interface AdviceRequest {
   readonly heroId: string;
   readonly state: GameState;
   readonly options?: AdviceOptions;
+  /**
+   * Behaviour per player id, from profiles. Sent as plain data because a
+   * lookup function cannot cross the worker boundary.
+   */
+  readonly tendenciesByPlayer?: Record<string, Tendencies>;
 }
 
 export interface AdviceResponse {
@@ -27,10 +34,17 @@ export interface AdviceResponse {
 }
 
 self.onmessage = (event: MessageEvent<AdviceRequest>) => {
-  const { id, hand, heroId, state, options } = event.data;
+  const { id, hand, heroId, state, options, tendenciesByPlayer } = event.data;
   let response: AdviceResponse;
   try {
-    response = { id, advice: advise(hand, heroId, state, options ?? {}), error: null };
+    const profiled = tendenciesByPlayer ?? {};
+    const withProfiles: AdviceOptions = {
+      ...(options ?? {}),
+      ...(Object.keys(profiled).length > 0
+        ? { tendenciesFor: (playerId: string) => profiled[playerId] ?? POOL_DEFAULTS }
+        : {}),
+    };
+    response = { id, advice: advise(hand, heroId, state, withProfiles), error: null };
   } catch (error) {
     // A modelling failure must not take the panel down with it.
     response = { id, advice: null, error: error instanceof Error ? error.message : String(error) };

@@ -117,6 +117,7 @@ function start(id: string): void {
         type: 'hand',
         gameId: id,
         hand: update.current,
+        completed: update.completed,
         heroId: update.heroId,
         heroNameGuess: heroName,
         at: Date.now(),

@@ -1,58 +1,44 @@
 /**
- * Side panel: renders whatever the content script last read from the table.
+ * Side panel.
  *
- * The panel deliberately owns no poker logic. It receives a `LiveHand`, bridges
- * it to a `GameState`, and hands that to the same engine and worker the manual
- * calculator uses — so both surfaces are guaranteed to agree.
+ * Owns no poker logic. It receives a hand from the reader, bridges it to a
+ * GameState, and hands that to the same engine the manual calculator uses —
+ * so the two surfaces cannot disagree. Its whole job is arranging the answer
+ * so it can be read in the time a poker clock allows.
  */
 
 import { StrictMode, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GameState } from '../../src/engine/gameState';
+import { PROFILES } from '../../src/advisor/strategy';
 import { toGameState } from '../../src/pokernow/bridge';
 import { LiveHand } from '../../src/pokernow/handState';
-import { Dashboard } from '../../src/ui/Dashboard';
-import { useAnalysis } from '../../src/ui/useAnalysis';
-import '../../src/styles.css';
-import './sidepanel.css';
-import { AdvicePanel } from './AdvicePanel';
-import { LiveTable } from './LiveTable';
-import { useAdvice } from './useAdvice';
+import './panel.css';
+import { Caveats, Decision, KeyNumbers, Options, Players, TableState } from './components';
 import { ExtensionMessage, STORAGE_KEY, StatusMessage } from './messages';
+import { useAdvice } from './useAdvice';
+import { useProfiles } from './useProfiles';
 
-/** A state the engine can always accept, used until a real hand arrives. */
-const IDLE_STATE: GameState = {
-  variant: 'texas',
-  totalPlayers: 2,
-  activePlayers: 2,
-  hole: [],
-  board: [],
-};
+const STRATEGY_KEYS = ['loose', 'standard', 'tight'] as const;
 
 function Panel() {
   const [hand, setHand] = useState<LiveHand | null>(null);
+  const [completed, setCompleted] = useState<readonly LiveHand[]>([]);
   const [heroId, setHeroId] = useState<string | null>(null);
   const [heroNameGuess, setHeroNameGuess] = useState<string | null>(null);
   const [status, setStatus] = useState<StatusMessage | null>(null);
   const [nameInput, setNameInput] = useState('');
   // Defaults to tight: the reason to reach for this tool is usually that you
   // are entering too many pots, not too few.
-  const [profile, setProfile] = useState('tight');
+  const [strategy, setStrategy] = useState('tight');
 
   useEffect(() => {
     void chrome.storage.local.get(`${STORAGE_KEY}.profile`).then((stored) => {
       const saved = stored[`${STORAGE_KEY}.profile`];
-      if (typeof saved === 'string') setProfile(saved);
+      if (typeof saved === 'string') setStrategy(saved);
     });
   }, []);
 
-  function chooseProfile(next: string) {
-    setProfile(next);
-    void chrome.storage.local.set({ [`${STORAGE_KEY}.profile`]: next });
-  }
-
   useEffect(() => {
-    // Show the last known state at once rather than waiting for a poll.
     void chrome.storage.local.get(STORAGE_KEY).then((stored) => {
       apply(stored[STORAGE_KEY] as ExtensionMessage | undefined);
     });
@@ -67,6 +53,7 @@ function Panel() {
       if (message.type === 'status') setStatus(message);
       if (message.type === 'hand') {
         setHand(message.hand);
+        setCompleted(message.completed ?? []);
         setHeroId(message.heroId);
         setHeroNameGuess(message.heroNameGuess);
         setStatus({ type: 'status', gameId: message.gameId, state: 'live' });
@@ -74,106 +61,170 @@ function Panel() {
     }
   }, []);
 
+  const profiles = useProfiles(hand, completed);
   const bridged = useMemo(
     () => (hand ? toGameState(hand, heroId) : { state: null, reason: 'Waiting for the table.' }),
     [hand, heroId],
   );
-  const { analysis, computing } = useAnalysis(bridged.state ?? IDLE_STATE);
-  const { advice, thinking, error: adviceError } = useAdvice(hand, heroId, bridged.state, profile);
+  const { advice, thinking, error } = useAdvice(
+    hand,
+    heroId,
+    bridged.state,
+    strategy,
+    profiles.tendenciesByPlayer,
+  );
+
+  function chooseStrategy(next: string) {
+    setStrategy(next);
+    void chrome.storage.local.set({ [`${STORAGE_KEY}.profile`]: next });
+  }
 
   return (
-    <div className="app panel-app">
-      <header className="app-header">
+    <div className="panel-app">
+      <header className="app-head">
         <h1>Poker Edge</h1>
-        <p className="subtitle">{describeStatus(status)}</p>
-        {status === null && (
-          <div className="subtitle">
-            <p>
-              The reader has not reported in. Try reconnecting; if that does not help, reload the
-              PokerNow tab.
-            </p>
-            <button type="button" onClick={() => void chrome.runtime.sendMessage({ type: 'reinject' })}>
-              Reconnect to the table
-            </button>
-          </div>
-        )}
+        <span className={`status ${statusClass(status)}`}>{describeStatus(status)}</span>
       </header>
 
-      {hand && <LiveTable hand={hand} heroId={heroId} />}
+      {status === null && <NoReader />}
 
-      {heroId === null && (
-        <div className="panel">
-          <div className="section">
-            <h3>Which player are you?</h3>
-            <p className="subtitle">
-              The log never says which seat is yours.
-              {heroNameGuess
-                ? ` The page looks like "${heroNameGuess}" — confirm or correct it.`
-                : ' Type the name exactly as it appears at the table.'}
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                const name = nameInput.trim() || heroNameGuess || '';
-                if (name) void sendToTable({ type: 'setHero', heroName: name });
-              }}
-            >
-              <input
-                value={nameInput}
-                placeholder={heroNameGuess ?? 'Your table name'}
-                onChange={(event) => setNameInput(event.target.value)}
-              />
-              <button type="submit">Set</button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {bridged.state && (
-        <AdvicePanel
-          advice={advice}
-          thinking={thinking}
-          error={adviceError}
-          profile={profile}
-          onProfile={chooseProfile}
+      {heroId === null && hand !== null && (
+        <HeroPrompt
+          guess={heroNameGuess}
+          value={nameInput}
+          onChange={setNameInput}
+          onSubmit={() => {
+            const name = nameInput.trim() || heroNameGuess || '';
+            if (name) void sendToTable({ type: 'setHero', heroName: name });
+          }}
         />
       )}
 
-      {bridged.state ? (
-        <Dashboard analysis={analysis} computing={computing} onSave={() => {}} canSave={false} />
+      {advice && bridged.state && hand ? (
+        <>
+          <Decision advice={advice} thinking={thinking} />
+          <KeyNumbers advice={advice} />
+          <Options advice={advice} />
+          <Players
+            advice={advice}
+            hand={hand}
+            profileFor={profiles.profileFor}
+            tagOf={profiles.tagOf}
+            onTag={profiles.setTag}
+          />
+          <TableState hand={hand} heroId={heroId} />
+          <Caveats advice={advice} hand={hand} />
+        </>
       ) : (
-        <div className="panel">
-          <p className="placeholder">{bridged.reason}</p>
-        </div>
+        <section className="card">
+          <p className="empty">
+            {error ?? (thinking ? 'Working out the spot…' : (bridged.reason ?? 'Waiting for the table.'))}
+          </p>
+        </section>
       )}
 
-      <footer className="app-footer">
-        <p>
-          Opponent ranges are inferred from position and betting. Pre-flop reads are on firm
-          ground; post-flop ones are a model of behaviour, not solved play. Runs entirely in your
-          browser.
-        </p>
-      </footer>
+      {hand && (
+        <section className="card">
+          <h3 className="card-title">How tight to play</h3>
+          <div className="segmented">
+            {STRATEGY_KEYS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={key === strategy ? 'is-active' : ''}
+                onClick={() => chooseStrategy(key)}
+              >
+                {PROFILES[key]?.name ?? key}
+              </button>
+            ))}
+          </div>
+          <p className="faint" style={{ marginTop: 8 }}>
+            {PROFILES[strategy]?.requiredEdgeBB
+              ? `Enters a pot only when the edge beats ${PROFILES[strategy]!.requiredEdgeBB} BB. Smaller edges sit inside the estimate's own error.`
+              : 'Takes every edge, however thin.'}
+          </p>
+          <details className="more">
+            <summary>Profiles recorded ({profiles.handsRecorded} hands on the most-seen player)</summary>
+            <button type="button" className="text-button" onClick={profiles.reset}>
+              Clear all player profiles
+            </button>
+          </details>
+        </section>
+      )}
     </div>
   );
 }
 
-/** Deliver a panel-to-content message to the PokerNow tab. */
+function NoReader() {
+  return (
+    <section className="card">
+      <p className="empty">
+        No signal from the PokerNow tab.
+        <br />
+        <button
+          type="button"
+          className="text-button"
+          onClick={() => void chrome.runtime.sendMessage({ type: 'reinject' })}
+        >
+          Reconnect to the table
+        </button>
+      </p>
+    </section>
+  );
+}
+
+function HeroPrompt({
+  guess,
+  value,
+  onChange,
+  onSubmit,
+}: {
+  guess: string | null;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="card">
+      <h3 className="card-title">Which player are you?</h3>
+      <p className="faint">
+        The log never says which seat is yours.
+        {guess ? ` The page looks like "${guess}".` : ' Type it exactly as it appears at the table.'}
+      </p>
+      <form
+        className="field"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <input
+          value={value}
+          placeholder={guess ?? 'Your table name'}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <button type="submit">Set</button>
+      </form>
+    </section>
+  );
+}
+
 async function sendToTable(message: ExtensionMessage): Promise<void> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === undefined) return;
   await chrome.tabs.sendMessage(tab.id, message).catch(() => {});
 }
 
-/**
- * Silence and "no game open" are different problems with different fixes, so
- * they must not share a message.
- */
 function describeStatus(status: StatusMessage | null): string {
-  if (!status) return 'No signal from the PokerNow tab yet.';
-  if (status.state === 'error') return `Trouble reading the table: ${status.detail ?? ''}`;
-  if (status.state === 'connecting') return status.detail ?? 'Connecting to the table…';
-  return 'Reading the table live.';
+  if (!status) return 'no reader';
+  if (status.state === 'error') return 'read error';
+  if (status.state === 'connecting') return status.gameId ? 'connecting' : 'no game open';
+  return 'live';
+}
+
+function statusClass(status: StatusMessage | null): string {
+  if (!status || status.state === 'error') return 'is-error';
+  return status.state === 'live' ? 'is-live' : '';
 }
 
 const root = document.getElementById('root');

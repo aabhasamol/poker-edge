@@ -265,6 +265,11 @@ src/
     range.ts           Weighted ranges, notation, card removal
     preflopStrength.ts GENERATED strength ordering (see tools/)
     rangeEquity.ts     Equity against ranges, by rejection sampling
+  profile/           Per-player statistics and reads
+    observe.ts         Counts and opportunities from finished hands
+    estimate.ts        Beta-Binomial posteriors with credible intervals
+    profile.ts         Tag + evidence -> a model of one player
+    store.ts           Identity, tags, persistence
   advisor/           Fold/call/raise recommendations
     strategy.ts        Tightness profiles and mixed strategies
     tendencies.ts      Population priors, replaceable per player
@@ -278,9 +283,13 @@ extension/           Manifest V3 Chrome extension
   manifest.json
   sidepanel.html
   src/content.ts     Polls the live log, forwards snapshots
-  src/sidepanel.tsx  Panel UI, reusing the engine and Dashboard
+  src/sidepanel.tsx  Panel shell and state
+  src/components.tsx Decision, numbers, options, players
+  src/panel.css      Design tokens and layout
+  src/useProfiles.ts Profile store, tags, persistence
   src/dom.ts         The one thing scraped from the page: hero's name
   src/messages.ts    Content <-> panel message contract
+  preview.html       Design harness, no extension APIs needed
 ```
 
 ## Advice, and what it rests on
@@ -486,6 +495,7 @@ are already playing in.
 ```
 content script (on the table)          side panel (extension page)
   poll /log ── parse ── hand state  ->   bridge -> GameState -> engine -> UI
+                                              profiles -> per-player ranges
 ```
 
 The content script does no interpretation: it polls, hands the lines to
@@ -502,6 +512,31 @@ who you are.
 The content script is built separately from the panel, as a single IIFE, because
 MV3 injects content scripts as classic scripts: an ES-module bundle would fail
 at its first `import`.
+
+### Panel design
+
+The panel is read under a twenty-second clock, in a narrow column, beside a
+busy table. So there is exactly one dominant element — the action — and
+everything below it is ordered by how often it is actually needed: the three
+numbers that justify the call, the alternatives with their values, then who you
+are up against. Anything not needed inside those twenty seconds is behind a
+disclosure.
+
+Colour carries meaning rather than decoration: each action keeps one hue
+wherever it appears, so the headline, the option list and the bars agree at a
+glance.
+
+Statistics are never shown bare. A rate appears with the hands behind it, and
+one resting entirely on a prior is dimmed and marked — otherwise it looks
+exactly like a number backed by two hundred hands, which is the misreading the
+whole profiling layer exists to prevent.
+
+`extension/preview.html` renders the panel against real advisor output with the
+browser APIs stubbed out, so the layout can be looked at rather than described:
+
+```bash
+npx vite -c vite.config.extension.ts
+```
 
 ### Replaying real logs
 

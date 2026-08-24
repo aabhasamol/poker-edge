@@ -9,11 +9,14 @@
 import { LiveHand } from '../../src/pokernow/handState';
 
 export const STORAGE_KEY = 'pokerEdge.latest';
+export const PROFILE_KEY = 'pokerEdge.profiles';
 
 export interface HandMessage {
   readonly type: 'hand';
   readonly gameId: string;
   readonly hand: LiveHand;
+  /** Hands that finished since the last message, for the profiler. */
+  readonly completed: readonly LiveHand[];
   readonly heroId: string | null;
   /** Hero's display name if the page revealed it, for the panel's prompt. */
   readonly heroNameGuess: string | null;

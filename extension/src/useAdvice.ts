@@ -18,6 +18,7 @@ export function useAdvice(
   heroId: string | null,
   state: GameState | null,
   profile: string,
+  tendenciesByPlayer: Record<string, unknown>,
 ): { advice: Advice | null; thinking: boolean; error: string | null } {
   const [advice, setAdvice] = useState<Advice | null>(null);
   const [thinking, setThinking] = useState(false);
@@ -55,8 +56,11 @@ export function useAdvice(
       hand.actions.length,
       contesting,
       profile,
+      // Re-run when a tag changes: the read is part of the question.
+      JSON.stringify(Object.keys(tendenciesByPlayer).sort()),
+      profileFingerprint(tendenciesByPlayer),
     ].join('/');
-  }, [hand, heroId, state, profile]);
+  }, [hand, heroId, state, profile, tendenciesByPlayer]);
 
   useEffect(() => {
     const worker = workerRef.current;
@@ -72,6 +76,7 @@ export function useAdvice(
       heroId,
       state,
       options: { samples: 12_000, strategy: PROFILES[profile] ?? TIGHT },
+      tendenciesByPlayer: tendenciesByPlayer as AdviceRequest['tendenciesByPlayer'],
     };
     worker.postMessage(request);
     // Intentionally keyed on `key`, not on `hand`: identical situations must
@@ -80,4 +85,14 @@ export function useAdvice(
   }, [key]);
 
   return { advice, thinking, error };
+}
+
+/** A cheap signature of the profile inputs, so tag edits trigger a re-run. */
+function profileFingerprint(tendencies: Record<string, unknown>): string {
+  return Object.values(tendencies)
+    .map((value) => {
+      const t = value as { limpPercent?: number; stickiness?: number };
+      return `${t.limpPercent?.toFixed(1)}:${t.stickiness?.toFixed(2)}`;
+    })
+    .join(',');
 }

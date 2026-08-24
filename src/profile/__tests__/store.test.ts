@@ -156,3 +156,37 @@ describe('profiles reach the advice', () => {
 function nameOf(id: string): string {
   return { cal: 'Cal', sam: 'Sam', bea: 'Bea', dee: 'Dee', eli: 'Eli' }[id] ?? id;
 }
+
+describe('estimates stay coherent with each other', () => {
+  it('never reports raising pre-flop more often than entering the pot', () => {
+    // Shrunk independently toward priors of different strengths, these two can
+    // cross: a player showed 78% PFR against 76% VPIP.
+    const store = new ProfileStore();
+    store.setTag('Cal', 'tight');
+    for (let i = 1; i <= 40; i++) store.record(handWhereCalAlwaysRaises(i));
+
+    const profile = store.profileOf('Cal')!;
+    expect(profile.estimates.pfr.rate).toBeLessThanOrEqual(profile.estimates.vpip.rate);
+    // And the derived "entered without raising" stays non-negative.
+    expect(profile.tendencies.limpPercent).toBeGreaterThanOrEqual(0);
+  });
+});
+
+/** Cal raises every hand, so both VPIP and PFR are observed at 100%. */
+function handWhereCalAlwaysRaises(number: number) {
+  const tracker = new HandTracker();
+  for (const line of [
+    `-- starting hand #${number} (id: r${number})  No Limit Texas Hold'em (dealer: "Hero @ hero") --`,
+    'Player stacks: #1 "Hero @ hero" (2000) | #2 "Sam @ sam" (2000) | #3 "Cal @ cal" (2000)',
+    '"Sam @ sam" posts a small blind of 10',
+    '"Cal @ cal" posts a big blind of 20',
+    '"Hero @ hero" folds',
+    '"Sam @ sam" folds',
+    '"Cal @ cal" raises to 80',
+    '"Cal @ cal" collected 110 from pot',
+    `-- ending hand #${number} --`,
+  ]) {
+    tracker.apply(parseLogMessage(line));
+  }
+  return tracker.snapshot();
+}
