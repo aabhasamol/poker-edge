@@ -13,11 +13,18 @@ export interface QueryRoot {
   querySelector(selectors: string): { textContent: string | null } | null;
 }
 
+/*
+ * Ordered most specific first. The substring matchers are deliberate: class
+ * names get renamed across redesigns far more often than the words in them
+ * disappear, so they outlive an exact-match list.
+ */
 const HERO_NAME_SELECTORS = [
   '.you-player .table-player-name a',
   '.you-player .table-player-name span',
   '.you-player .table-player-name',
   '.table-player.you-player .table-player-name',
+  '[class*="you-player"] [class*="player-name"]',
+  '[class*="you"] [class*="player-name"]',
 ];
 
 /**

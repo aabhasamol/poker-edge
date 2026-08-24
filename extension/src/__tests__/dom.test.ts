@@ -21,6 +21,10 @@ describe('hero name detection', () => {
     expect(findHeroName(root({ '.you-player .table-player-name span': 'Cara\n2,400' }))).toBe('Cara');
   });
 
+  it('survives a class rename via substring matching', () => {
+    expect(findHeroName(root({ '[class*="you-player"] [class*="player-name"]': 'Dana' }))).toBe('Dana');
+  });
+
   it('returns null rather than guessing when the markup has changed', () => {
     // Correctness must never depend on these selectors; the panel asks instead.
     expect(findHeroName(root({}))).toBeNull();

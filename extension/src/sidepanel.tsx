@@ -68,6 +68,13 @@ function Panel() {
       <header className="app-header">
         <h1>Poker Edge</h1>
         <p className="subtitle">{describeStatus(status)}</p>
+        {status === null && (
+          <p className="subtitle">
+            The reader has not reported in. Reload the PokerNow tab — a content script only
+            attaches on page load, so a tab opened before the extension was installed never got
+            one.
+          </p>
+        )}
       </header>
 
       {hand && <LiveTable hand={hand} heroId={heroId} />}
@@ -125,10 +132,14 @@ async function sendToTable(message: ExtensionMessage): Promise<void> {
   await chrome.tabs.sendMessage(tab.id, message).catch(() => {});
 }
 
+/**
+ * Silence and "no game open" are different problems with different fixes, so
+ * they must not share a message.
+ */
 function describeStatus(status: StatusMessage | null): string {
-  if (!status) return 'Open a PokerNow game to begin.';
+  if (!status) return 'No signal from the PokerNow tab yet.';
   if (status.state === 'error') return `Trouble reading the table: ${status.detail ?? ''}`;
-  if (status.state === 'connecting') return 'Connecting to the table…';
+  if (status.state === 'connecting') return status.detail ?? 'Connecting to the table…';
   return 'Reading the table live.';
 }
 
