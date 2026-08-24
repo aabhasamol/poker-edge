@@ -248,9 +248,73 @@ src/
     analyze.ts         Top-level analyze(state) entry point
     cli.ts / format.ts Debug harness
     __tests__/         Vitest suite
+  pokernow/          PokerNow log ingestion (pure, DOM-free)
+    types.ts           Event vocabulary for the game log
+    logParser.ts       Log prose -> structured events
+    handState.ts       Event stream -> live hand state
+    positions.ts       Button-relative position labelling
+    session.ts         Feed ordering, de-duplication, hand history
+    bridge.ts          Live hand -> engine GameState
+    csv.ts             Reader for exported PokerNow logs
+    replay.ts          Replay harness for real logs
+    __tests__/         Vitest suite + a full-hand fixture
   ui/                React components, hand history, worker hook
   worker/            Web Worker running the engine
 ```
+
+## Reading a live PokerNow game
+
+`src/pokernow/` turns a PokerNow game log into engine input, so a hand can be
+analysed as it is dealt instead of typed in card by card.
+
+PokerNow serves an append-only log per game:
+
+```
+GET /games/<gameId>/log?after_at=<iso-timestamp>
+-> { logs: [ { msg, created_at }, ... ] }
+```
+
+Every fact the engine needs is in `msg` as English prose — hole cards, board,
+bet sizes, showdowns. Two properties of that feed drive the design: lines
+arrive **newest first**, and polling with `after_at` **re-delivers** the
+boundary line. `LogSession` absorbs both; feeding a line twice would silently
+double-count chips.
+
+The endpoint is same-origin and session-authenticated, and your hole cards are
+only ever sent to your own seat's connection. A link alone is therefore not
+enough to follow a game from outside — the reader has to run in the browser tab
+that is seated at the table.
+
+### Trusting the numbers
+
+PokerNow reports bet amounts as a player's running total for the street
+(`raises to 60`), not the increment. Pot accounting depends on that reading, so
+it is checked rather than assumed:
+
+- a call that lands below the current bet without being all-in is flagged as a
+  likely increment-vs-total mismatch;
+- at the end of every hand, total contributions are compared against the pots
+  collected.
+
+Both surface as `diagnostics` on the hand rather than being absorbed silently,
+because a wrong reading would corrupt every pot-odds number downstream while
+still looking plausible.
+
+Unrecognised prose is never an error. It becomes an `unknown` event carrying
+its original text, so an upstream wording change degrades the tool instead of
+breaking it.
+
+### Replaying a real log
+
+A game host can download the full log as CSV. Replaying one is the fastest way
+to find out what the parser does not yet understand:
+
+```bash
+npm run replay -- ~/Downloads/poker_now_log.csv --hero "Your Name" --verbose
+```
+
+It reports hands parsed, unparsed line shapes grouped by frequency, and any
+accounting diagnostics.
 
 ## Mathematical philosophy
 
