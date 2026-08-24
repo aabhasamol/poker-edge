@@ -153,6 +153,26 @@ describe('combining ranges', () => {
     expect(halved.comboCount()).toBeCloseTo(3, 6);
   });
 
+  it('normalises so a narrowed range still reports a sensible width', () => {
+    // Narrowing multiplies every weight, shrinking the total even when the
+    // relative likelihoods are unchanged — which reads as a far tighter range
+    // than it is.
+    const range = Range.topPercent(20);
+    const narrowed = range.reweight((_, weight) => weight * 0.05);
+    expect(narrowed.fraction()).toBeCloseTo(range.fraction() * 0.05, 6);
+    expect(narrowed.normalized().fraction()).toBeCloseTo(range.fraction(), 6);
+  });
+
+  it('leaves relative weights — and so equity — untouched when normalising', () => {
+    const uneven = Range.parse('AA, KK').range.reweight((index, weight) =>
+      Range.parse('AA').range.weightAt(index) > 0 ? weight * 0.2 : weight * 0.1,
+    );
+    const normalised = uneven.normalized();
+    const ratioBefore = uneven.byClass().get('AA')! / uneven.byClass().get('KK')!;
+    const ratioAfter = normalised.byClass().get('AA')! / normalised.byClass().get('KK')!;
+    expect(ratioAfter).toBeCloseTo(ratioBefore, 10);
+  });
+
   it('summarises by class for display', () => {
     const byClass = Range.parse('AA, AKo').range.byClass();
     expect(byClass.get('AA')).toBe(6);

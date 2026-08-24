@@ -110,11 +110,8 @@ export function advise(
     caveats.push(`Equity estimate is ±${(equity.stdError * 200).toFixed(1)} points at 95%.`);
   }
 
-  // Two assumptions worth stating every time, because they bound what the
-  // numbers can mean rather than merely adding uncertainty to them.
-  caveats.push(
-    'Raise values assume the hand then runs to showdown with no further betting, so they ignore what position and later streets are worth.',
-  );
+  // An assumption worth stating every time, because it bounds what the numbers
+  // can mean rather than merely adding uncertainty to them.
   caveats.push(
     'Implied odds are not modelled: hands that rarely win but win big when they do — small pairs, suited connectors — are undervalued here.',
   );
@@ -155,8 +152,33 @@ export function advise(
     });
   }
 
-  // --- Raise, at a couple of sizes ---
-  for (const option of raiseOptions(pot, toCall, heroStack)) {
+  /*
+   * --- Raise, at a couple of sizes ---
+   *
+   * Only when an opponent can actually respond. Against players who are all in
+   * there is nothing to raise: the table disables the button, and the model
+   * would otherwise credit the raise with fold equity against someone who
+   * cannot fold — inventing a large positive number for an illegal action.
+   */
+  const canRespond = opponents.filter(
+    (entry) => entry.player.status !== 'allIn' && entry.player.stack > 0,
+  );
+  const heroCommitted = hero?.committedStreet ?? 0;
+  const callableCeiling = canRespond.length
+    ? Math.max(...canRespond.map((e) => e.player.stack + e.player.committedStreet - heroCommitted))
+    : 0;
+
+  if (canRespond.length === 0 && ranges.length > 0) {
+    caveats.push('Every opponent is already all in, so there is nothing left to raise.');
+  } else if (ranges.length > 0) {
+    caveats.push(
+      'Raise values assume the hand then runs to showdown with no further betting, so they ignore what position and later streets are worth.',
+    );
+  }
+
+  for (const option of canRespond.length === 0
+    ? []
+    : raiseOptions(pot, toCall, Math.min(heroStack, Math.max(callableCeiling, toCall)))) {
     const evaluated = evaluateRaise(
       state,
       ranges,
@@ -165,6 +187,7 @@ export function advise(
       { samples: Math.min(samples, 8_000), seed },
       tendencies,
       hand,
+      opponents.map((entry) => entry.player.status !== 'allIn' && entry.player.stack > 0),
     );
     choices.push({
       action: 'raise',
@@ -261,13 +284,19 @@ function evaluateRaise(
   sampling: { samples: number; seed: number },
   tendencies: Tendencies,
   hand: LiveHand,
+  /** Whether each opponent is able to fold at all; all-in players are not. */
+  canFold: readonly boolean[],
 ): RaiseEvaluation {
   if (ranges.length === 0) {
     return { ev: pot, foldProbability: 1, equityWhenCalled: 1 };
   }
 
   const price = raise / (pot + raise);
-  const split = ranges.map((range) => splitByPrice(range, state, price, tendencies, hand));
+  const split = ranges.map((range, index) => {
+    // An all-in player sees every card regardless of what hero does.
+    if (canFold[index] === false) return { continuing: range, foldProbability: 0 };
+    return splitByPrice(range, state, price, tendencies, hand);
+  });
 
   const foldProbability = split.reduce((product, part) => product * part.foldProbability, 1);
   const continuing = split.map((part) => part.continuing);

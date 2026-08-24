@@ -162,6 +162,63 @@ describe('bounding the raise model', () => {
   });
 });
 
+describe('only legal actions', () => {
+  /** Hero faces an all-in on the river with everyone else already out. */
+  function facingAllIn() {
+    return situation(
+      [
+        '-- starting hand #20 (id: t20)  No Limit Texas Hold\'em (dealer: "Villain @ vil") --',
+        'Player stacks: #1 "Hero @ hero" (2000) | #2 "Villain @ vil" (2000) | #3 "Folder @ fold3" (2000)',
+        '"Hero @ hero" posts a small blind of 10',
+        '"Folder @ fold3" posts a big blind of 20',
+        'Your hand is 5♣, 10♦',
+        '"Villain @ vil" raises to 60',
+        '"Hero @ hero" calls 60',
+        '"Folder @ fold3" folds',
+        'Flop:  [3♦, 4♠, 10♣]',
+        '"Hero @ hero" checks',
+        '"Villain @ vil" bets 100',
+        '"Hero @ hero" calls 100',
+        'Turn: 3♦, 4♠, 10♣ [K♥]',
+        '"Hero @ hero" checks',
+        '"Villain @ vil" bets 340',
+        '"Hero @ hero" calls 340',
+        'River: 3♦, 4♠, 10♣, K♥ [2♠]',
+        '"Hero @ hero" bets 600',
+        '"Villain @ vil" raises to 1500 and go all in',
+      ],
+      'hero',
+    );
+  }
+
+  it('never offers a raise when every opponent is already all in', () => {
+    // There is nothing to raise: the table disables the button, and the model
+    // would otherwise credit the raise with folds from someone who cannot fold.
+    const { hand, state } = facingAllIn();
+    const advice = advise(hand, 'hero', state, FAST);
+
+    expect(hand.players.find((p) => p.id === 'vil')!.status).toBe('allIn');
+    expect(advice.options.some((o) => o.action === 'raise')).toBe(false);
+    expect(advice.options.map((o) => o.action).sort()).toEqual(['call', 'fold']);
+    expect(advice.recommendation).not.toBe('raise');
+  });
+
+  it('says why raising is unavailable, and drops the raise caveat', () => {
+    const { hand, state } = facingAllIn();
+    const advice = advise(hand, 'hero', state, FAST);
+    const text = advice.caveats.join(' ');
+    expect(text).toContain('all in');
+    // The showdown assumption only bounds raise values, so it is noise here.
+    expect(text).not.toContain('Raise values assume');
+  });
+
+  it('still offers a raise when someone behind can respond', () => {
+    const { hand, state } = facingRaise('As Ah');
+    const advice = advise(hand, 'hero', state, FAST);
+    expect(advice.options.some((o) => o.action === 'raise')).toBe(true);
+  });
+});
+
 describe('honesty about the model', () => {
   it('labels post-flop advice as resting on heuristics', () => {
     const { hand, state } = situation(

@@ -159,6 +159,28 @@ export class Range {
     return new Range(next);
   }
 
+  /**
+   * Rescale so the most likely holding has weight 1.
+   *
+   * Narrowing a range multiplies every weight by a continuation probability,
+   * which shrinks the total even when the RELATIVE likelihoods are unchanged.
+   * Equity only ever uses relative weights, so it is unaffected — but the
+   * reported width is not, and an unnormalised range reads as "1% of hands"
+   * when it is nothing of the kind. After rescaling, the width means what a
+   * player means by it: the equivalent number of hands played at full weight.
+   */
+  normalized(): Range {
+    let max = 0;
+    for (let index = 0; index < COMBO_COUNT; index++) {
+      const weight = this.weights[index]!;
+      if (weight > max) max = weight;
+    }
+    if (max === 0 || max === 1) return this;
+    const next = new Float64Array(COMBO_COUNT);
+    for (let index = 0; index < COMBO_COUNT; index++) next[index] = this.weights[index]! / max;
+    return new Range(next);
+  }
+
   /** Non-zero combinations with their weights, for sampling and enumeration. */
   entries(): { index: number; weight: number }[] {
     const result: { index: number; weight: number }[] = [];

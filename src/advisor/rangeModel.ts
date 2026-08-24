@@ -61,7 +61,7 @@ export function modelOpponentRange(
     range = applyPostflopActions(range, hand, actions, tendencies, reasoning);
   }
 
-  const final = range.withoutCards(known);
+  const final = range.withoutCards(known).normalized();
   if (final.isEmpty()) {
     reasoning.push('No holding survives — the read is inconsistent with the cards on show.');
   }
