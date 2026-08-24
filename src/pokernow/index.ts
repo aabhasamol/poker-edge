@@ -11,3 +11,4 @@ export * from './handState';
 export * from './session';
 export * from './bridge';
 export * from './csv';
+export * from './feed';

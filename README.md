@@ -256,10 +256,13 @@ src/
     session.ts         Feed ordering, de-duplication, hand history
     bridge.ts          Live hand -> engine GameState
     csv.ts             Reader for exported PokerNow logs
+    feed.ts            Adapters for the raw /log endpoint payload
     replay.ts          Replay harness for real logs
     __tests__/         Vitest suite + a full-hand fixture
   ui/                React components, hand history, worker hook
   worker/            Web Worker running the engine
+tools/
+  fetch-logs.js      Console script to bulk-save your own game logs
 ```
 
 ## Reading a live PokerNow game
@@ -304,17 +307,34 @@ Unrecognised prose is never an error. It becomes an `unknown` event carrying
 its original text, so an upstream wording change degrades the tool instead of
 breaking it.
 
-### Replaying a real log
+### Replaying real logs
 
-A game host can download the full log as CSV. Replaying one is the fastest way
-to find out what the parser does not yet understand:
+Replaying real games is the fastest way to find out what the parser does not
+yet understand. Two sources work:
+
+A single game, from the CSV a host can download:
 
 ```bash
 npm run replay -- ~/Downloads/poker_now_log.csv --hero "Your Name" --verbose
 ```
 
-It reports hands parsed, unparsed line shapes grouped by frequency, and any
-accounting diagnostics.
+Or many games at once. `tools/fetch-logs.js` is pasted into the browser console
+on a signed-in pokernow.club tab; it walks the game links on the page, fetches
+each `/log` with your session, and saves one bundle:
+
+```bash
+npm run replay -- ~/Downloads/pokernow-logs-*.pokernow.json --hero "Your Name"
+```
+
+Each game is replayed in its own session, since hero's seat id differs between
+games and hand numbering restarts.
+
+Either way the run reports hands parsed, unparsed line shapes grouped by
+frequency, and any accounting diagnostics.
+
+Real logs stay out of git: `logs/`, `*.pokernow.csv` and `*.pokernow.json` are
+ignored, because a log names every player at the table and shows the hands they
+revealed.
 
 ## Mathematical philosophy
 

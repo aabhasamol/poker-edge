@@ -5,3 +5,9 @@ dist-ssr
 .DS_Store
 coverage
 *.tmp.ts
+
+# Real PokerNow logs — contain other players' names and revealed hands.
+# The repo is public; these must never be committed.
+logs/
+*.pokernow.csv
+*.pokernow.json

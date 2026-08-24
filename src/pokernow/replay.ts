@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { cardsToString } from '../engine/card';
 import { parseLogCsv } from './csv';
+import { BundledGame, parseLogBundle } from './feed';
 import { LiveHand } from './handState';
 import { parseLogMessage } from './logParser';
 import { LogSession } from './session';
@@ -53,10 +54,26 @@ function summarise(hand: LiveHand): string {
 function main(): void {
   const args = parseArgs(process.argv);
   const text = readFileSync(args.path, 'utf8');
-  const lines = parseLogCsv(text);
 
-  const session = new LogSession(args.hero ? { heroName: args.hero } : {});
-  const update = session.ingest(lines);
+  // A `.pokernow.json` bundle holds many games; a CSV export holds one.
+  const games: BundledGame[] = args.path.endsWith('.json')
+    ? parseLogBundle(text)
+    : [{ id: args.path, lines: parseLogCsv(text) }];
+
+  if (games.length === 0) {
+    console.error(`No log data found in ${args.path}.`);
+    process.exit(1);
+  }
+
+  const lines = games.flatMap((game) => game.lines);
+
+  // Each game gets its own session: hero's seat id differs between games, and
+  // hand numbering restarts, so merging them would corrupt both.
+  const sessions = games.map((game) => {
+    const session = new LogSession(args.hero ? { heroName: args.hero } : {});
+    session.ingest(game.lines);
+    return { game, session };
+  });
 
   // Count unparsed prose across the whole file, grouped by shape, so a
   // systematic gap stands out from one-off chat messages.
@@ -68,13 +85,15 @@ function main(): void {
     unknown.set(shape, (unknown.get(shape) ?? 0) + 1);
   }
 
-  const hands = session.hands;
+  const hands = sessions.flatMap(({ session }) => session.hands);
   const diagnostics = hands.flatMap((h) => h.diagnostics);
+  const identified = sessions.filter(({ session }) => session.heroId !== null).length;
 
   console.log(`\nFile        ${args.path}`);
-  console.log(`Log lines   ${lines.length} (${update.applied} applied)`);
+  console.log(`Games       ${games.length}`);
+  console.log(`Log lines   ${lines.length}`);
   console.log(`Hands       ${hands.length} complete`);
-  console.log(`Hero        ${session.heroId ?? 'not identified — pass --hero "Your Name"'}`);
+  console.log(`Hero        identified in ${identified}/${games.length} games${identified === games.length ? '' : ' — pass --hero "Your Name"'}`);
   console.log(`Diagnostics ${diagnostics.length}`);
   console.log(`Unparsed    ${[...unknown.values()].reduce((a, b) => a + b, 0)} lines, ${unknown.size} distinct shapes`);
 
@@ -91,8 +110,11 @@ function main(): void {
   }
 
   if (args.verbose && hands.length > 0) {
-    console.log('\nHands:');
-    for (const hand of hands) console.log(`  ${summarise(hand)}`);
+    for (const { game, session } of sessions) {
+      if (session.hands.length === 0) continue;
+      console.log(`\n${game.id} (${session.hands.length} hands):`);
+      for (const hand of session.hands) console.log(`  ${summarise(hand)}`);
+    }
   }
   console.log('');
 }
