@@ -1,0 +1,45 @@
+/* Panel-specific layout: a narrow single column, unlike the desktop app. */
+
+.panel-app {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  max-width: 100%;
+}
+
+.panel-app .app-header h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.live-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.live-table th,
+.live-table td {
+  text-align: left;
+  padding: 3px 6px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.live-table .is-hero {
+  font-weight: 600;
+}
+
+.live-table .is-folded {
+  opacity: 0.45;
+}
+
+.live-table .is-aggressor td {
+  border-left: 2px solid currentColor;
+}
+
+.diagnostics {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+}

@@ -23,7 +23,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-/** Convert a `/log` response body into log lines. */
+/**
+ * Convert a `/log` response body into log lines, oldest first.
+ *
+ * The endpoint serves newest-first. The reversal matters because timestamps
+ * are not unique — a hand's start, seats and blinds share one millisecond —
+ * and when no sequence number is available, the only remaining tie-break is
+ * arrival order. Reversed, that tie-break is chronological; unreversed, it
+ * silently inverts each same-millisecond group.
+ */
 export function fromLogResponse(body: unknown): LogLine[] {
   if (!isRecord(body) || !Array.isArray(body.logs)) return [];
 
@@ -33,9 +41,16 @@ export function fromLogResponse(body: unknown): LogLine[] {
     const msg = entry.msg;
     if (typeof msg !== 'string' || msg.length === 0) continue;
     const at = entry.created_at;
-    lines.push(typeof at === 'string' ? { msg, at } : { msg });
+    // The CSV export carries an `order` column; if the live feed ever does
+    // too, it takes precedence over any positional guess.
+    const order = typeof entry.order === 'number' ? entry.order : Number(entry.order);
+    lines.push({
+      msg,
+      ...(typeof at === 'string' ? { at } : {}),
+      ...(Number.isSafeInteger(order) ? { order } : {}),
+    });
   }
-  return lines;
+  return lines.reverse();
 }
 
 /**

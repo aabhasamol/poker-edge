@@ -20,7 +20,7 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
 
-    "types": ["vitest/globals", "node"]
+    "types": ["vitest/globals", "node", "chrome"]
   },
-  "include": ["src"]
+  "include": ["src", "extension"]
 }

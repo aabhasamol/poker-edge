@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Poker Edge",
+  "version": "0.1.0",
+  "description": "Reads your PokerNow table as it is dealt and shows live equity, outs and pot odds.",
+  "permissions": ["storage", "sidePanel"],
+  "host_permissions": ["https://www.pokernow.club/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.pokernow.club/games/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Poker Edge — open panel"
+  }
+}

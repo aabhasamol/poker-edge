@@ -249,6 +249,7 @@ src/
     cli.ts / format.ts Debug harness
     __tests__/         Vitest suite
   pokernow/          PokerNow log ingestion (pure, DOM-free)
+    poller.ts          Incremental polling, cursor and backoff
     types.ts           Event vocabulary for the game log
     logParser.ts       Log prose -> structured events
     handState.ts       Event stream -> live hand state
@@ -263,6 +264,13 @@ src/
   worker/            Web Worker running the engine
 tools/
   fetch-logs.js      Console script to bulk-save your own game logs
+extension/           Manifest V3 Chrome extension
+  manifest.json
+  sidepanel.html
+  src/content.ts     Polls the live log, forwards snapshots
+  src/sidepanel.tsx  Panel UI, reusing the engine and Dashboard
+  src/dom.ts         The one thing scraped from the page: hero's name
+  src/messages.ts    Content <-> panel message contract
 ```
 
 ## Reading a live PokerNow game
@@ -326,6 +334,48 @@ downstream while still looking plausible.
 Unrecognised prose is never an error. It becomes an `unknown` event carrying
 its original text, so an upstream wording change degrades the tool instead of
 breaking it.
+
+## The browser extension
+
+`extension/` is a Manifest V3 Chrome extension that reads the table you are
+playing at and renders the analysis in a side panel.
+
+```bash
+npm run build:ext
+```
+
+Then load `extension/dist` at `chrome://extensions` with Developer mode on, and
+click the toolbar button to open the panel next to a game.
+
+### Why it has to be an extension
+
+The log endpoint is authenticated by the page's session cookie, and hole cards
+are delivered only to the connection that is actually seated. Nothing outside
+that tab can read them — not a server, not another browser, not a link pasted
+somewhere else. The reader therefore runs as a content script in the tab you
+are already playing in.
+
+### Shape
+
+```
+content script (on the table)          side panel (extension page)
+  poll /log ── parse ── hand state  ->   bridge -> GameState -> engine -> UI
+```
+
+The content script does no interpretation: it polls, hands the lines to
+`src/pokernow`, and forwards the resulting snapshot. The panel owns no poker
+logic either — it bridges the snapshot to a `GameState` and runs the same
+engine and worker the manual calculator uses, so the two surfaces cannot drift
+apart.
+
+Only one thing is scraped from the page: hero's display name, which the log
+never states. Those selectors are the least stable part of the extension, so
+nothing depends on them for correctness — if the guess fails, the panel asks
+who you are.
+
+The content script is built separately from the panel, as a single IIFE, because
+MV3 injects content scripts as classic scripts: an ES-module bundle would fail
+at its first `import`.
 
 ### Replaying real logs
 
