@@ -21,6 +21,7 @@ import { actsLast } from '../pokernow/positions';
 import { comboCards, comboFromIndex } from '../range/combos';
 import { Range } from '../range/range';
 import { computeRangeEquity, RangeEquityResult } from '../range/rangeEquity';
+import { currentThreats, futureThreats } from '../engine/threats';
 import { bestScore, getVariant } from '../engine/variant';
 import { Card } from '../engine/card';
 import { DEFAULT_TENDENCIES, modelAllOpponents, RangeExplanation, TendenciesLookup } from './rangeModel';
@@ -39,8 +40,18 @@ export type AdviceAction = 'fold' | 'check' | 'call' | 'raise';
 
 export interface AdviceOption {
   readonly action: AdviceAction;
-  /** Chips hero puts in now. */
+  /** Chips hero puts in now, on top of anything already committed. */
   readonly amount: number;
+  /**
+   * For a raise, hero's TOTAL commitment for the street afterwards — the number
+   * a poker client's raise box expects.
+   *
+   * These differ whenever hero has already put chips in this street, and
+   * conflating them is dangerous: with 60 already committed, adding 70 makes
+   * 130, but was displayed as "raise to 70". Following that literally makes a
+   * different bet than the one the advice was computed for.
+   */
+  readonly raiseTo: number | null;
   /** Expected chips gained versus folding. */
   readonly ev: number;
   /** How the number was arrived at. */
@@ -67,8 +78,38 @@ export interface Advice {
   /** Price of the call as a share of the resulting pot. */
   readonly requiredEquity: number | null;
   readonly opponents: readonly { player: PlayerState; explanation: RangeExplanation }[];
+  /** Chance at least one opponent already holds a better hand than hero. */
+  readonly behindNow: number | null;
+  /** Chance an opponent currently behind draws out by the river. */
+  readonly drawOutRisk: number | null;
   /** Everything the reader should distrust about this advice. */
   readonly caveats: readonly string[];
+}
+
+/**
+ * How often hero is already beaten, and how often a hand that is currently
+ * behind gets there.
+ *
+ * These come from the engine's own threat analysis, but computed against the
+ * MODELLED ranges rather than random cards — the same correction that applies
+ * to equity. "One opponent in three has you beaten" means something different
+ * when that opponent has been raising.
+ */
+function summariseThreats(
+  state: GameState,
+  ranges: readonly Range[],
+  equity: RangeEquityResult,
+): { behindNow: number | null; drawOutRisk: number | null } {
+  if (ranges.length === 0 || equity.impossible) return { behindNow: null, drawOutRisk: null };
+  if (state.board.length < 3) return { behindNow: null, drawOutRisk: null };
+
+  const behind = currentThreats({ ...state, activePlayers: state.activePlayers });
+  const future = futureThreats(state, { samples: 4_000 });
+
+  return {
+    behindNow: behind.applicable ? (behind.atLeastOneProbability ?? behind.anyBetterProbability) : null,
+    drawOutRisk: future.applicable ? (future.atLeastOne ?? future.perOpponent) : null,
+  };
 }
 
 const ACTION_NOUN: Record<AdviceAction, string> = {
@@ -164,12 +205,19 @@ export function advise(
    * two remain comparable.
    */
   if (toCall > 0) {
-    choices.push({ action: 'fold', amount: 0, ev: 0, basis: 'Giving up costs nothing more.' });
+    choices.push({
+      action: 'fold',
+      amount: 0,
+      raiseTo: null,
+      ev: 0,
+      basis: 'Giving up costs nothing more.',
+    });
   } else {
     const ev = equity.equity * pot;
     choices.push({
       action: 'check',
       amount: 0,
+      raiseTo: null,
       ev,
       basis: `Free card, keeping ${(equity.equity * 100).toFixed(1)}% of the ${pot} already in the middle.`,
     });
@@ -182,6 +230,7 @@ export function advise(
     choices.push({
       action: 'call',
       amount: call,
+      raiseTo: null,
       ev,
       basis: `${(equity.equity * 100).toFixed(1)}% of a ${pot + call} pot, less the ${call} it costs.`,
     });
@@ -236,6 +285,7 @@ export function advise(
     choices.push({
       action: 'raise',
       amount: option.amount,
+      raiseTo: heroCommitted + option.amount,
       ev: evaluated.ev,
       basis:
         `${option.label}: they fold ${(evaluated.foldProbability * 100).toFixed(0)}% of the time, ` +
@@ -314,8 +364,12 @@ export function advise(
           ? 'speculative'
           : 'clear';
 
+  const threats = summariseThreats(state, ranges, equity);
+
   return {
     recommendation: best.action,
+    behindNow: threats.behindNow,
+    drawOutRisk: threats.drawOutRisk,
     mix: mixed.mix.map((entry: MixedOption<AdviceOption>) => ({
       action: entry.option.action,
       amount: entry.option.amount,

@@ -13,12 +13,22 @@ import { PROFILES } from '../../src/advisor/strategy';
 import { toGameState } from '../../src/pokernow/bridge';
 import { hasPendingDecision, LiveHand } from '../../src/pokernow/handState';
 import './panel.css';
-import { Caveats, Decision, KeyNumbers, Options, Players, TableState } from './components';
+import { Caveats, Decision, KeyNumbers, Options, Players, Standing, TableState } from './components';
 import { ExtensionMessage, STORAGE_KEY, StatusMessage } from './messages';
 import { useAdvice } from './useAdvice';
+import { useAnalysis } from '../../src/ui/useAnalysis';
 import { useProfiles } from './useProfiles';
 
 const STRATEGY_KEYS = ['loose', 'standard', 'tight'] as const;
+
+/** A state the engine always accepts, used while no hand is in progress. */
+const IDLE_STATE = {
+  variant: 'texas' as const,
+  totalPlayers: 2,
+  activePlayers: 2,
+  hole: [],
+  board: [],
+};
 
 function Panel() {
   const [hand, setHand] = useState<LiveHand | null>(null);
@@ -73,6 +83,10 @@ function Panel() {
     strategy,
     profiles.tendenciesByPlayer,
   );
+
+  // Threat analysis — what beats hero now, what draws out — comes from the
+  // engine, in its own worker so it never delays the recommendation.
+  const { analysis } = useAnalysis(bridged.state ?? IDLE_STATE);
 
   // The log never says whose turn it is, but it says enough to work out
   // whether hero still owes an action. Recommending a line while the table's
@@ -130,6 +144,7 @@ function Panel() {
             <Waiting hand={hand} heroId={heroId} advice={advice} />
           )}
           <KeyNumbers advice={advice} />
+          <Standing advice={advice} analysis={bridged.state ? analysis : null} />
           <Options advice={advice} />
           <Players
             advice={advice}

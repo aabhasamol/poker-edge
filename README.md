@@ -413,6 +413,29 @@ be bet afterwards. Calling an all-in has no future decisions to misplay, which
 is why a pot-committed player calls a shove far wider than a bet of the same
 price with money still behind.
 
+### Being played
+
+A model that reads betting as evidence of strength is exploitable by anyone who
+bets more often than it assumes. Bluff enough and the advisor keeps folding
+hands that were ahead. This is not hypothetical — it is the most direct way to
+turn the tool against its user, and it needs a mechanism rather than a
+reassurance.
+
+The check is showdowns. Whenever a player bets or raises last and their cards
+are revealed, the profiler records what they actually held. If they keep showing
+nothing after betting, three things happen: their measured bluff rate replaces
+the assumed one in the range model, the panel warns that their bets mean less
+than it credits, and the advice moves on its own.
+
+It cuts the other way too. A player who has shown a real hand in almost every
+bet showdown gets flagged as someone to fold against more readily than the model
+suggests.
+
+What it cannot do is catch an opponent who never goes to showdown. If they take
+the pot down every time, there is no evidence to learn from — and the panel's
+"speculative" label on post-flop advice is doing real work in exactly those
+spots.
+
 ### What the advisor will not tell you
 
 Expected values are in chips, relative to folding now; chips already in the pot

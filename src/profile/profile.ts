@@ -33,6 +33,7 @@ interface StatPriors {
   readonly threeBet: Prior;
   readonly cBet: Prior;
   readonly foldToCBet: Prior;
+  readonly bluff: Prior;
 }
 
 /**
@@ -50,6 +51,7 @@ const PRIORS: Record<PlayerTag, StatPriors> = {
     threeBet: { rate: 0.05, strength: 15 },
     cBet: { rate: 0.5, strength: 10 },
     foldToCBet: { rate: 0.55, strength: 10 },
+    bluff: { rate: 0.25, strength: 6 },
   },
   loose: {
     vpip: { rate: 0.7, strength: 18 },
@@ -57,6 +59,7 @@ const PRIORS: Record<PlayerTag, StatPriors> = {
     threeBet: { rate: 0.05, strength: 15 },
     cBet: { rate: 0.45, strength: 10 },
     foldToCBet: { rate: 0.45, strength: 10 },
+    bluff: { rate: 0.3, strength: 6 },
   },
   standard: {
     vpip: { rate: 0.45, strength: 18 },
@@ -64,6 +67,7 @@ const PRIORS: Record<PlayerTag, StatPriors> = {
     threeBet: { rate: 0.06, strength: 15 },
     cBet: { rate: 0.55, strength: 10 },
     foldToCBet: { rate: 0.55, strength: 10 },
+    bluff: { rate: 0.25, strength: 6 },
   },
   tight: {
     vpip: { rate: 0.24, strength: 18 },
@@ -71,6 +75,7 @@ const PRIORS: Record<PlayerTag, StatPriors> = {
     threeBet: { rate: 0.07, strength: 15 },
     cBet: { rate: 0.6, strength: 10 },
     foldToCBet: { rate: 0.62, strength: 10 },
+    bluff: { rate: 0.2, strength: 6 },
   },
 };
 
@@ -83,6 +88,13 @@ export interface PlayerProfile {
   readonly suggestedTag: PlayerTag;
   /** Set when the data disagrees with your tag; worth a second look. */
   readonly disagreement: string | null;
+  /**
+   * Set when this player's showdowns contradict what the model assumes about
+   * their bluffing. This is the check on being played: a model that reads
+   * betting as strength is exploitable by anyone who bets far more than it
+   * expects, and revealed hands are the only direct evidence of it.
+   */
+  readonly exploitWarning: string | null;
   readonly handsSeen: number;
   readonly estimates: {
     readonly vpip: Estimate;
@@ -90,6 +102,8 @@ export interface PlayerProfile {
     readonly threeBet: Estimate;
     readonly cBet: Estimate;
     readonly foldToCBet: Estimate;
+    /** How often they showed nothing after betting — measured, not assumed. */
+    readonly bluff: Estimate;
   };
   /** Post-flop bets and raises per call; above 1 means aggressive. */
   readonly aggressionFactor: number | null;
@@ -116,6 +130,7 @@ export function buildProfile(observation: PlayerObservation, tag: PlayerTag): Pl
     threeBet: estimateRate(observation.threeBet, priors.threeBet),
     cBet: estimateRate(observation.cBet, priors.cBet),
     foldToCBet: estimateRate(observation.foldToCBet, priors.foldToCBet),
+    bluff: estimateRate(observation.bluffAtShowdown ?? EMPTY, priors.bluff),
   };
 
   const aggressionFactor =
@@ -127,6 +142,7 @@ export function buildProfile(observation: PlayerObservation, tag: PlayerTag): Pl
 
   const suggestedTag = classify(estimates.vpip);
   return {
+    exploitWarning: describeExploit(estimates.bluff, priors.bluff),
     playerId: observation.playerId,
     name: observation.name,
     tag,
@@ -137,6 +153,35 @@ export function buildProfile(observation: PlayerObservation, tag: PlayerTag): Pl
     aggressionFactor,
     tendencies: toTendencies(estimates, aggressionFactor),
   };
+}
+
+const EMPTY = { count: 0, opportunities: 0 };
+
+/**
+ * Compare measured bluffing against what the range model assumes.
+ *
+ * The model reads a bet as evidence of strength, tempered by an assumed bluff
+ * rate. That assumption is precisely the thing an opponent can exploit: bet
+ * often enough with nothing and the model keeps folding hero's winners. When
+ * their showdowns say otherwise, say so rather than quietly carrying on.
+ */
+function describeExploit(bluff: Estimate, prior: Prior): string | null {
+  if (readStrength(bluff) === 'none' || readStrength(bluff) === 'thin') return null;
+  // Only worth raising when the difference is outside the credible interval.
+  if (bluff.low > prior.rate * 1.6) {
+    return (
+      `Showed nothing after betting in ${bluff.opportunities} showdowns ` +
+      `(${(bluff.rate * 100).toFixed(0)}%, well above the ${(prior.rate * 100).toFixed(0)}% assumed). ` +
+      'Their bets mean less than the model credits — call lighter than it suggests.'
+    );
+  }
+  if (bluff.high < prior.rate * 0.4) {
+    return (
+      `Has shown a real hand in almost every one of ${bluff.opportunities} bet showdowns. ` +
+      'Their bets mean more than the model credits — fold more readily than it suggests.'
+    );
+  }
+  return null;
 }
 
 /** What the evidence alone says, or 'unknown' while it is still too thin. */
@@ -200,9 +245,13 @@ function toTendencies(
     // A player who folds to most bets is one worth bluffing; the range model
     // reads stickiness as how readily they continue.
     stickiness: clamp(1 - estimates.foldToCBet.rate, 0.05, 0.95),
-    bluffFrequency: aggressionFactor === null
-      ? POOL_DEFAULTS.bluffFrequency
-      : clamp(0.12 + 0.12 * aggressionFactor, 0.05, 0.6),
+    // Measured bluffing beats inferred aggression when there is any of it.
+    bluffFrequency:
+      estimates.bluff.opportunities > 0
+        ? clamp(estimates.bluff.rate, 0.05, 0.7)
+        : aggressionFactor === null
+          ? POOL_DEFAULTS.bluffFrequency
+          : clamp(0.12 + 0.12 * aggressionFactor, 0.05, 0.6),
   };
 }
 

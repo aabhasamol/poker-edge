@@ -526,3 +526,34 @@ details.more[open] > summary::before {
 .text-button:hover {
   color: var(--text);
 }
+
+/* Likely holdings, named the way a player would name them. */
+.hand-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: var(--space-2) 0;
+}
+
+.hand-chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.hand-chip em {
+  font-style: normal;
+  color: var(--text-faint);
+  margin-left: 4px;
+}
+
+/* A warning that the model's assumptions are being contradicted reads
+   differently from one that merely questions your tag. */
+.disagreement.is-exploit {
+  background: color-mix(in srgb, var(--fold) 12%, transparent);
+  color: var(--fold);
+}

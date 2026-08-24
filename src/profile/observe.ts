@@ -12,6 +12,9 @@
  * with folding to a bet nobody made.
  */
 
+import { Card } from '../engine/card';
+import { ReportCategory, toReportCategory } from '../engine/handRank';
+import { bestHand, getVariant } from '../engine/variant';
 import { ActionRecord, LiveHand, PlayerState } from '../pokernow/handState';
 import { Street } from '../pokernow/types';
 
@@ -38,6 +41,10 @@ export interface ShowdownRecord {
   readonly cards: readonly string[];
   /** The label the log gave the winning hand, when it collected a pot. */
   readonly handLabel: string | null;
+  /** What they actually held, evaluated against the board. */
+  readonly category: string | null;
+  /** Bet or raised last, and showed less than a pair. */
+  readonly bluffed: boolean;
 }
 
 export interface PlayerObservation {
@@ -61,6 +68,13 @@ export interface PlayerObservation {
   readonly wentToShowdown: Tally;
   /** Won at showdown. */
   readonly wonAtShowdown: Tally;
+  /**
+   * Of the showdowns where they had bet or raised last, how many revealed a
+   * hand that could not win — the only direct evidence of how much they bluff,
+   * and the check that stops the range model from being quietly exploited by a
+   * player who bets far more often than it assumes.
+   */
+  readonly bluffAtShowdown: Tally;
   /** Post-flop bets and raises, for aggression. */
   readonly aggressiveActions: number;
   /** Post-flop calls, for aggression. */
@@ -81,6 +95,7 @@ export function emptyObservation(playerId: string, name: string): PlayerObservat
     foldToCBet: EMPTY_TALLY,
     wentToShowdown: EMPTY_TALLY,
     wonAtShowdown: EMPTY_TALLY,
+    bluffAtShowdown: EMPTY_TALLY,
     aggressiveActions: 0,
     passiveActions: 0,
     showdowns: [],
@@ -104,6 +119,7 @@ export function mergeObservations(
     foldToCBet: addTally(a.foldToCBet, b.foldToCBet),
     wentToShowdown: addTally(a.wentToShowdown, b.wentToShowdown),
     wonAtShowdown: addTally(a.wonAtShowdown, b.wonAtShowdown),
+    bluffAtShowdown: addTally(a.bluffAtShowdown, b.bluffAtShowdown),
     aggressiveActions: a.aggressiveActions + b.aggressiveActions,
     passiveActions: a.passiveActions + b.passiveActions,
     showdowns: [...a.showdowns, ...b.showdowns],
@@ -223,16 +239,28 @@ function observePlayer(
   const passiveActions = postflop.filter((a) => a.action === 'call').length;
 
   const showdowns: ShowdownRecord[] = [];
+  let bluffAtShowdown: Tally = EMPTY_TALLY;
+
   if (reachedShowdown && player.shownCards) {
     const lastStreet = postflop[postflop.length - 1];
     const collected = hand.collected.find((c) => c.playerId === player.id);
+    const wasAggressor = lastStreet?.action === 'bet' || lastStreet?.action === 'raise';
+    const category = categoryShown(hand, player.shownCards);
+    // "Less than a pair" is the cleanest line for a hand that bet with nothing.
+    // Compared against the enum, not a hand-typed string: the label is
+    // "High Card", and the mismatch silently recorded zero bluffs.
+    const bluffed = wasAggressor && category === ReportCategory.HighCard;
+
     showdowns.push({
       handId: hand.handId,
-      wasAggressor: lastStreet?.action === 'bet' || lastStreet?.action === 'raise',
+      wasAggressor,
       betShareOfPot: lastStreet && lastStreet.potBefore > 0 ? lastStreet.added / lastStreet.potBefore : 0,
       cards: player.shownCards.map((card) => `${card.rank}${card.suit}`),
       handLabel: collected?.handLabel ?? null,
+      category,
+      bluffed,
     });
+    if (wasAggressor) bluffAtShowdown = { count: bluffed ? 1 : 0, opportunities: 1 };
   }
 
   return {
@@ -246,10 +274,19 @@ function observePlayer(
     foldToCBet,
     wentToShowdown,
     wonAtShowdown,
+    bluffAtShowdown,
     aggressiveActions,
     passiveActions,
     showdowns,
   };
+}
+
+/** What a revealed holding actually made on this board. */
+function categoryShown(hand: LiveHand, cards: readonly Card[]): string | null {
+  if (hand.board.length < 3) return null;
+  const variant = getVariant(hand.variant);
+  const best = bestHand(variant, cards, hand.board);
+  return best ? toReportCategory(best) : null;
 }
 
 /** Fold a hand's observations into a running table of player statistics. */

@@ -132,6 +132,7 @@ function emptyFor(identity: string): PlayerObservation {
     foldToCBet: { count: 0, opportunities: 0 },
     wentToShowdown: { count: 0, opportunities: 0 },
     wonAtShowdown: { count: 0, opportunities: 0 },
+    bluffAtShowdown: { count: 0, opportunities: 0 },
     aggressiveActions: 0,
     passiveActions: 0,
     showdowns: [],
@@ -151,6 +152,10 @@ function mergeInto(existing: PlayerObservation, incoming: PlayerObservation): Pl
     foldToCBet: add(existing.foldToCBet, incoming.foldToCBet),
     wentToShowdown: add(existing.wentToShowdown, incoming.wentToShowdown),
     wonAtShowdown: add(existing.wonAtShowdown, incoming.wonAtShowdown),
+    bluffAtShowdown: add(
+      existing.bluffAtShowdown ?? { count: 0, opportunities: 0 },
+      incoming.bluffAtShowdown,
+    ),
     aggressiveActions: existing.aggressiveActions + incoming.aggressiveActions,
     passiveActions: existing.passiveActions + incoming.passiveActions,
     // Showdowns are the calibration data for bluffing; keep the recent ones.

@@ -190,3 +190,59 @@ function handWhereCalAlwaysRaises(number: number) {
   }
   return tracker.snapshot();
 }
+
+describe('catching a model that is being played', () => {
+  /** Villain bets the river and shows a hand that could never win. */
+  function bluffShowdown(number: number) {
+    const tracker = new HandTracker();
+    for (const line of [
+      `-- starting hand #${number} (id: b${number})  No Limit Texas Hold'em (dealer: "Hero @ hero") --`,
+      'Player stacks: #1 "Hero @ hero" (2000) | #2 "Villain @ vil" (2000)',
+      '"Hero @ hero" posts a small blind of 10',
+      '"Villain @ vil" posts a big blind of 20',
+      '"Hero @ hero" calls 20',
+      '"Villain @ vil" checks',
+      'Flop:  [K♠, 9♦, 4♣]',
+      '"Villain @ vil" bets 40',
+      '"Hero @ hero" calls 40',
+      'Turn: K♠, 9♦, 4♣ [2♥]',
+      '"Villain @ vil" bets 80',
+      '"Hero @ hero" calls 80',
+      'River: K♠, 9♦, 4♣, 2♥ [7♠]',
+      '"Villain @ vil" bets 200',
+      '"Hero @ hero" calls 200',
+      '"Villain @ vil" shows a 6♦, 3♦.',
+      '"Hero @ hero" collected 680 from pot',
+      `-- ending hand #${number} --`,
+    ]) {
+      tracker.apply(parseLogMessage(line));
+    }
+    return tracker.snapshot();
+  }
+
+  it('records what they actually held after betting', () => {
+    const store = new ProfileStore();
+    store.record(bluffShowdown(1));
+    const profile = store.profileOf('Villain')!;
+    expect(profile.estimates.bluff.observed).toBe(1);
+    expect(store.profileOf('Villain')!.handsSeen).toBe(1);
+  });
+
+  it('warns when their showdowns contradict what the model assumes', () => {
+    // The answer to "can an opponent game this?": yes — so the tool checks its
+    // own assumption against the hands they reveal.
+    const store = new ProfileStore();
+    for (let i = 1; i <= 12; i++) store.record(bluffShowdown(i));
+
+    const profile = store.profileOf('Villain')!;
+    expect(profile.exploitWarning).toContain('call lighter');
+    // And the range model is told, not just the user.
+    expect(profile.tendencies.bluffFrequency).toBeGreaterThan(0.5);
+  });
+
+  it('says nothing on a sample too small to mean anything', () => {
+    const store = new ProfileStore();
+    store.record(bluffShowdown(1));
+    expect(store.profileOf('Villain')!.exploitWarning).toBeNull();
+  });
+});

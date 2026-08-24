@@ -14,7 +14,8 @@ import { HandTracker } from '../../src/pokernow/handState';
 import { parseLogMessage } from '../../src/pokernow/logParser';
 import { PlayerTag, ProfileStore } from '../../src/profile';
 import './panel.css';
-import { Caveats, Decision, KeyNumbers, Options, Players, TableState } from './components';
+import { analyze } from '../../src/engine/analyze';
+import { Caveats, Decision, KeyNumbers, Options, Players, Standing, TableState } from './components';
 
 const LINES = [
   '-- starting hand #24 (id: prev24)  No Limit Texas Hold\'em (dealer: "Swagat @ swa") --',
@@ -73,6 +74,7 @@ function Preview() {
   const [, bump] = useState(0);
 
   const advice = advise(hand, 'hero', state, { samples: 6_000, seed: 3 });
+  const analysis = analyze(state);
 
   return (
     <div className="panel-app">
@@ -82,6 +84,7 @@ function Preview() {
       </header>
       <Decision advice={advice} thinking={false} />
       <KeyNumbers advice={advice} />
+      <Standing advice={advice} analysis={analysis} />
       <Options advice={advice} />
       <Players
         advice={advice}
