@@ -121,15 +121,25 @@ export function advise(
 
   const choices: AdviceOption[] = [];
 
-  // --- Fold / check: the baseline ---
+  /*
+   * Folding really is worth zero: hero surrenders every claim on the pot.
+   *
+   * Checking is NOT. It costs nothing and keeps hero's share of the pot that
+   * already exists, which is worth equity x pot. Scoring it at zero flattered
+   * every bet by exactly that amount — on a 40-chip pot with 11% equity it
+   * overstated betting by 4.6 chips, enough to invert any close decision. It is
+   * valued on the same "runs to showdown" assumption used for calling, so the
+   * two remain comparable.
+   */
   if (toCall > 0) {
     choices.push({ action: 'fold', amount: 0, ev: 0, basis: 'Giving up costs nothing more.' });
   } else {
+    const ev = equity.equity * pot;
     choices.push({
       action: 'check',
       amount: 0,
-      ev: 0,
-      basis: 'Seeing the next card for free.',
+      ev,
+      basis: `Free card, keeping ${(equity.equity * 100).toFixed(1)}% of the ${pot} already in the middle.`,
     });
   }
 

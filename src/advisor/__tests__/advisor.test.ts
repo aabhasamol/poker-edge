@@ -38,8 +38,19 @@ describe('the price of a call', () => {
     );
     const advice = advise(hand, 'hero', state, FAST);
     expect(advice.requiredEquity).toBeNull();
-    expect(advice.options.some((o) => o.action === 'check')).toBe(true);
-    expect(advice.options.find((o) => o.action === 'check')!.ev).toBe(0);
+
+    // Checking is free but not worthless: it keeps hero's share of the pot
+    // that already exists. Scoring it at zero flatters every bet by exactly
+    // that amount, which is enough to invert a close decision.
+    const check = advice.options.find((o) => o.action === 'check')!;
+    expect(check.ev).toBeCloseTo(advice.equity.equity * state.potSize!, 6);
+    expect(check.ev).toBeGreaterThan(0);
+  });
+
+  it('scores folding at zero, because folding surrenders the pot', () => {
+    const { hand, state } = facingRaise('7c 2d');
+    const advice = advise(hand, 'hero', state, FAST);
+    expect(advice.options.find((o) => o.action === 'fold')!.ev).toBe(0);
   });
 });
 
