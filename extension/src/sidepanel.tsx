@@ -15,7 +15,9 @@ import { Dashboard } from '../../src/ui/Dashboard';
 import { useAnalysis } from '../../src/ui/useAnalysis';
 import '../../src/styles.css';
 import './sidepanel.css';
+import { AdvicePanel } from './AdvicePanel';
 import { LiveTable } from './LiveTable';
+import { useAdvice } from './useAdvice';
 import { ExtensionMessage, STORAGE_KEY, StatusMessage } from './messages';
 
 /** A state the engine can always accept, used until a real hand arrives. */
@@ -62,6 +64,7 @@ function Panel() {
     [hand, heroId],
   );
   const { analysis, computing } = useAnalysis(bridged.state ?? IDLE_STATE);
+  const { advice, thinking, error: adviceError } = useAdvice(hand, heroId, bridged.state);
 
   return (
     <div className="app panel-app">
@@ -111,6 +114,8 @@ function Panel() {
         </div>
       )}
 
+      {bridged.state && <AdvicePanel advice={advice} thinking={thinking} error={adviceError} />}
+
       {bridged.state ? (
         <Dashboard analysis={analysis} computing={computing} onSave={() => {}} canSave={false} />
       ) : (
@@ -121,8 +126,9 @@ function Panel() {
 
       <footer className="app-footer">
         <p>
-          Opponents are modelled as uniformly-random legal cards — no hand ranges yet, so equity
-          against a raiser is optimistic. Runs entirely in your browser.
+          Opponent ranges are inferred from position and betting. Pre-flop reads are on firm
+          ground; post-flop ones are a model of behaviour, not solved play. Runs entirely in your
+          browser.
         </p>
       </footer>
     </div>

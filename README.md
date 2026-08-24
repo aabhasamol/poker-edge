@@ -260,6 +260,15 @@ src/
     feed.ts            Adapters for the raw /log endpoint payload
     replay.ts          Replay harness for real logs
     __tests__/         Vitest suite + a full-hand fixture
+  range/             Weighted hand ranges (Texas only)
+    combos.ts          The 1326 combinations and their 169 classes
+    range.ts           Weighted ranges, notation, card removal
+    preflopStrength.ts GENERATED strength ordering (see tools/)
+    rangeEquity.ts     Equity against ranges, by rejection sampling
+  advisor/           Fold/call/raise recommendations
+    tendencies.ts      Population priors, replaceable per player
+    rangeModel.ts      Actions -> a range, with its reasoning
+    advisor.ts         Expected value of each option
   ui/                React components, hand history, worker hook
   worker/            Web Worker running the engine
 tools/
@@ -272,6 +281,60 @@ extension/           Manifest V3 Chrome extension
   src/dom.ts         The one thing scraped from the page: hero's name
   src/messages.ts    Content <-> panel message contract
 ```
+
+## Advice, and what it rests on
+
+`src/range/` and `src/advisor/` turn a read of the table into a fold/call/raise
+recommendation. They are kept strictly separate from the engine, which reports
+only what is mathematically true and [deliberately refuses to
+advise](src/engine/potOdds.ts). Everything below that line is exact or
+measured; everything above it rests on a model of how opponents behave, which
+can be wrong in ways arithmetic cannot.
+
+### Why ranges come before advice
+
+The engine models opponents as holding uniformly random cards. That is right
+for "what are my odds" and badly wrong the moment someone raises — it credits
+the raiser with 72o as often as AA. A worked example, hero holding 9-8 offsuit
+facing a continuation bet:
+
+| | Equity | Verdict |
+|---|---|---|
+| vs random cards | 31.8% | call (25.8% needed) |
+| vs their betting range | 10.3% | fold |
+
+The naive number does not merely add noise; it inverts the decision. So ranges
+landed before the advisor rather than after it.
+
+### How a range is built
+
+Pre-flop, from position and action — opening, calling and 3-betting
+frequencies applied to the engine's own strength ordering. This part is on
+firm ground.
+
+Post-flop, holdings are reweighted by how they fare on the board: strong hands
+favoured when a player bets, middling ones when they call. **This is a
+heuristic**, and the advisor labels every conclusion drawn from it
+`speculative`. A bluff floor is always kept in a betting range — without it the
+model concludes every bet beats hero, which is the single most expensive
+mistake a range model can make.
+
+Frequencies live in a replaceable `Tendencies` object holding population priors
+for a home game. The player profiler replaces those with measurements.
+
+### What the advisor will not tell you
+
+Expected values are in chips, relative to folding now; chips already in the pot
+are gone either way and never enter the comparison. Two assumptions bound every
+answer, and are printed with it:
+
+- **Raises are valued as though the hand then runs to showdown**, ignoring what
+  position and later streets are worth. Left unbounded this recommends shoving
+  100 big blinds over a 3 big blind open with aces — consistent within its own
+  assumptions, and terrible. All-ins are therefore only offered below a
+  stack-to-pot ratio of 3, where the assumption roughly holds.
+- **Implied odds are not modelled**, so small pairs and suited connectors are
+  undervalued.
 
 ## Reading a live PokerNow game
 
