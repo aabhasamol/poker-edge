@@ -107,6 +107,8 @@ export interface PlayerProfile {
   };
   /** Post-flop bets and raises per call; above 1 means aggressive. */
   readonly aggressionFactor: number | null;
+  /** Mean strength shown after betting, and how many showdowns back it. */
+  readonly showdownStrength: { readonly mean: number; readonly samples: number };
   /** What the range model should assume about this player. */
   readonly tendencies: Tendencies;
 }
@@ -140,6 +142,17 @@ export function buildProfile(observation: PlayerObservation, tag: PlayerTag): Pl
         ? null
         : null;
 
+  /*
+   * Mean strength of what they showed after betting, shrunk toward the pool
+   * average. A handful of showdowns is weak evidence, but it is the only DIRECT
+   * evidence of what this player's bets are made of.
+   */
+  const shownSamples = observation.aggressiveShowdowns ?? 0;
+  const priorWeight = 4;
+  const shownStrength =
+    (POOL_DEFAULTS.showdownStrength * priorWeight + (observation.aggressiveShowdownStrength ?? 0)) /
+    (priorWeight + shownSamples);
+
   const suggestedTag = classify(estimates.vpip);
   return {
     exploitWarning: describeExploit(estimates.bluff, priors.bluff),
@@ -151,7 +164,8 @@ export function buildProfile(observation: PlayerObservation, tag: PlayerTag): Pl
     handsSeen: observation.handsDealt,
     estimates,
     aggressionFactor,
-    tendencies: toTendencies(estimates, aggressionFactor),
+    showdownStrength: { mean: shownStrength, samples: shownSamples },
+    tendencies: toTendencies(estimates, aggressionFactor, shownStrength),
   };
 }
 
@@ -220,6 +234,8 @@ function describeDisagreement(
 function toTendencies(
   estimates: PlayerProfile['estimates'],
   aggressionFactor: number | null,
+  /** Mean strength shown after betting, shrunk toward the pool's. */
+  shownStrength: number,
 ): Tendencies {
   // Keep the positional shape of the defaults, scaled by how often this player
   // actually raises: a passive player opens narrowly from every seat.
@@ -245,6 +261,7 @@ function toTendencies(
     // A player who folds to most bets is one worth bluffing; the range model
     // reads stickiness as how readily they continue.
     stickiness: clamp(1 - estimates.foldToCBet.rate, 0.05, 0.95),
+    showdownStrength: shownStrength,
     // Measured bluffing beats inferred aggression when there is any of it.
     bluffFrequency:
       estimates.bluff.opportunities > 0

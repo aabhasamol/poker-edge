@@ -31,6 +31,13 @@ export interface Tendencies {
   readonly bluffFrequency: number;
   /** How readily this player continues facing a bet, 0 = nit, 1 = station. */
   readonly stickiness: number;
+  /**
+   * Typical strength of the hands they show after betting, 0 (high card) to 1
+   * (royal flush). Sets how far a bet narrows their range: a player who keeps
+   * turning up with one pair after a large bet is not representing the nuts,
+   * whatever the size of the bet.
+   */
+  readonly showdownStrength: number;
 }
 
 /**
@@ -56,6 +63,7 @@ export const POOL_DEFAULTS: Tendencies = {
   blindDefendPercent: 40,
   bluffFrequency: 0.25,
   stickiness: 0.55,
+  showdownStrength: 0.42,
 };
 
 /** A tighter, more aggressive opponent, for tests and for manual overrides. */
@@ -79,4 +87,5 @@ export const TIGHT_AGGRESSIVE: Tendencies = {
   blindDefendPercent: 28,
   bluffFrequency: 0.3,
   stickiness: 0.35,
+  showdownStrength: 0.5,
 };

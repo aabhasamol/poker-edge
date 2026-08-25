@@ -13,7 +13,11 @@
  */
 
 import { Card } from '../engine/card';
-import { ReportCategory, toReportCategory } from '../engine/handRank';
+import {
+  REPORT_CATEGORIES_STRONGEST_FIRST,
+  ReportCategory,
+  toReportCategory,
+} from '../engine/handRank';
 import { bestHand, getVariant } from '../engine/variant';
 import { ActionRecord, LiveHand, PlayerState } from '../pokernow/handState';
 import { Street } from '../pokernow/types';
@@ -75,6 +79,17 @@ export interface PlayerObservation {
    * player who bets far more often than it assumes.
    */
   readonly bluffAtShowdown: Tally;
+  /**
+   * Summed strength of the hands they revealed after betting last, on a scale
+   * where 0 is high card and 1 is a royal flush, with the count alongside.
+   *
+   * "Did they bluff" is too blunt a question. A player who keeps showing one
+   * pair after large bets is not bluffing, but his bets mean far less than a
+   * model that reads betting as near-nut strength assumes — which is exactly
+   * how hero came to be told to fold a straight to a man holding top pair.
+   */
+  readonly aggressiveShowdownStrength: number;
+  readonly aggressiveShowdowns: number;
   /** Post-flop bets and raises, for aggression. */
   readonly aggressiveActions: number;
   /** Post-flop calls, for aggression. */
@@ -96,6 +111,8 @@ export function emptyObservation(playerId: string, name: string): PlayerObservat
     wentToShowdown: EMPTY_TALLY,
     wonAtShowdown: EMPTY_TALLY,
     bluffAtShowdown: EMPTY_TALLY,
+    aggressiveShowdownStrength: 0,
+    aggressiveShowdowns: 0,
     aggressiveActions: 0,
     passiveActions: 0,
     showdowns: [],
@@ -120,6 +137,8 @@ export function mergeObservations(
     wentToShowdown: addTally(a.wentToShowdown, b.wentToShowdown),
     wonAtShowdown: addTally(a.wonAtShowdown, b.wonAtShowdown),
     bluffAtShowdown: addTally(a.bluffAtShowdown, b.bluffAtShowdown),
+    aggressiveShowdownStrength: a.aggressiveShowdownStrength + b.aggressiveShowdownStrength,
+    aggressiveShowdowns: a.aggressiveShowdowns + b.aggressiveShowdowns,
     aggressiveActions: a.aggressiveActions + b.aggressiveActions,
     passiveActions: a.passiveActions + b.passiveActions,
     showdowns: [...a.showdowns, ...b.showdowns],
@@ -240,6 +259,8 @@ function observePlayer(
 
   const showdowns: ShowdownRecord[] = [];
   let bluffAtShowdown: Tally = EMPTY_TALLY;
+  let aggressiveShowdownStrength = 0;
+  let aggressiveShowdowns = 0;
 
   if (reachedShowdown && player.shownCards) {
     const lastStreet = postflop[postflop.length - 1];
@@ -260,7 +281,11 @@ function observePlayer(
       category,
       bluffed,
     });
-    if (wasAggressor) bluffAtShowdown = { count: bluffed ? 1 : 0, opportunities: 1 };
+    if (wasAggressor) {
+      bluffAtShowdown = { count: bluffed ? 1 : 0, opportunities: 1 };
+      aggressiveShowdownStrength = categoryStrength(category);
+      aggressiveShowdowns = 1;
+    }
   }
 
   return {
@@ -275,10 +300,21 @@ function observePlayer(
     wentToShowdown,
     wonAtShowdown,
     bluffAtShowdown,
+    aggressiveShowdownStrength,
+    aggressiveShowdowns,
     aggressiveActions,
     passiveActions,
     showdowns,
   };
+}
+
+/** Category rank on a 0 (high card) to 1 (royal flush) scale. */
+function categoryStrength(category: string | null): number {
+  if (category === null) return 0;
+  const index = REPORT_CATEGORIES_STRONGEST_FIRST.indexOf(category as ReportCategory);
+  if (index < 0) return 0;
+  const last = REPORT_CATEGORIES_STRONGEST_FIRST.length - 1;
+  return (last - index) / last;
 }
 
 /** What a revealed holding actually made on this board. */

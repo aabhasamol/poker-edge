@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseCards } from '../../engine/card';
+import { comboIndicesForClass } from '../../range/combos';
 import { modelOpponentRange } from '../rangeModel';
 import { POOL_DEFAULTS, TIGHT_AGGRESSIVE } from '../tendencies';
 import { replay, sixHanded } from './helpers';
@@ -28,8 +29,19 @@ describe('pre-flop reads', () => {
     const opener = rangeFor(sixHanded('As Kd', ['"Cal @ cal" raises to 60']), 'cal');
 
     expect(threeBet.fraction).toBeLessThan(opener.fraction);
-    expect(threeBet.fraction * 100).toBeCloseTo(POOL_DEFAULTS.threeBetPercent, 0);
     expect(threeBet.reasoning.join(' ')).toContain('Re-raised');
+
+    // The reported width now includes the range's soft edge, so it exceeds the
+    // nominal percentage. What must hold is that the weight sits on premium
+    // hands: the tail is a tail, not a second range.
+    // Per COMBO, not per class: an offsuit class holds twelve combinations to
+    // a pair's six, so class totals rank by shape rather than by strength.
+    const perCombo = (key: string) =>
+      (threeBet.range.byClass().get(key) ?? 0) / comboIndicesForClass(key).length;
+
+    expect(perCombo('AA')).toBeGreaterThan(0.9);
+    expect(perCombo('AA')).toBeGreaterThan(perCombo('A5o'));
+    expect(perCombo('KK')).toBeGreaterThan(perCombo('87o'));
   });
 
   it('opens tighter from early position than from the button', () => {
@@ -126,5 +138,66 @@ describe('post-flop reads', () => {
     );
     expect(read.reasoning.length).toBeGreaterThanOrEqual(2);
     expect(read.reasoning[0]).toContain('Opened');
+  });
+});
+
+describe('no holding is declared impossible', () => {
+  it('leaves a limper some chance of a hand outside the nominal range', () => {
+    /*
+     * The failure this guards, from a real session: a player who limped was
+     * modelled as the top 32% of hands, which gave J-6 offsuit weight ZERO.
+     * Nothing later could reintroduce it — he turned up with exactly that,
+     * and hero was told to fold a straight to him.
+     */
+    const hand = replay(sixHanded('As Kd', ['"Cal @ cal" calls 20']));
+    const player = hand.players.find((p) => p.id === 'cal')!;
+    const read = modelOpponentRange(hand, player, []);
+
+    const perCombo = (key: string) =>
+      (read.range.byClass().get(key) ?? 0) / comboIndicesForClass(key).length;
+
+    // Present, but far less likely than the hands he is supposed to have.
+    expect(perCombo('J6o')).toBeGreaterThan(0);
+    expect(perCombo('J6o')).toBeLessThan(perCombo('AKs'));
+    expect(perCombo('72o')).toBeLessThan(perCombo('J6o'));
+  });
+
+  it('keeps the tail thin enough that a raiser still reads as strong', () => {
+    const hand = replay(sixHanded('As Kd', ['"Cal @ cal" raises to 60']));
+    const player = hand.players.find((p) => p.id === 'cal')!;
+    const read = modelOpponentRange(hand, player, []);
+    const perCombo = (key: string) =>
+      (read.range.byClass().get(key) ?? 0) / comboIndicesForClass(key).length;
+
+    expect(perCombo('AA')).toBeGreaterThan(0.9);
+    expect(perCombo('72o')).toBeLessThan(0.1);
+  });
+
+  it('widens a betting range for someone who shows weak hands after betting', () => {
+    // The second half of the same failure: how far a bet narrows a range must
+    // depend on what that player actually turns up with.
+    const hand = replay(
+      sixHanded('As Kd', [
+        '"Cal @ cal" raises to 60',
+        '"Hero @ hero" calls 60',
+        '"Sam @ sam" folds',
+        '"Bea @ bea" folds',
+        '"Dee @ dee" folds',
+        '"Eli @ eli" folds',
+        'Flop:  [9♥, 10♦, 8♦]',
+        '"Cal @ cal" bets 80',
+      ]),
+    );
+    const player = hand.players.find((p) => p.id === 'cal')!;
+    const showsStrong = modelOpponentRange(hand, player, [], {
+      ...POOL_DEFAULTS,
+      showdownStrength: 0.7,
+    });
+    const showsWeak = modelOpponentRange(hand, player, [], {
+      ...POOL_DEFAULTS,
+      showdownStrength: 0.15,
+    });
+
+    expect(showsWeak.fraction).toBeGreaterThan(showsStrong.fraction);
   });
 });

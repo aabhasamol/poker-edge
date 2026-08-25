@@ -101,13 +101,21 @@ describe('what makes those answers come out right', () => {
     expect(share(strong.basis)).toBeLessThanOrEqual(100);
   });
 
-  it('makes players fold more to a re-raise than to a first raise', () => {
-    // A blind defends a steal fairly wide but cold-calls a 3-bet rarely.
-    const foldsTo = (spot: ReturnType<typeof stealSpot>) => {
-      const raise = adviceFor(spot).options.find((o) => o.action === 'raise')!;
-      return Number(/fold (\d+)%/.exec(raise.basis)![1]);
-    };
-    expect(foldsTo(facingOpen('As Ks'))).toBeGreaterThan(foldsTo(stealSpot('As Ks')));
+  it('gets more folds from a larger raise', () => {
+    // Comparing fold rates across spots with different numbers of opponents
+    // compares products of different lengths, which says nothing. Price
+    // sensitivity within one spot is the property that matters.
+    const spot = facingOpen('As Ks');
+    const advice = adviceFor(spot);
+    const raises = advice.options
+      .filter((o) => o.action === 'raise')
+      .map((o) => ({ amount: o.amount, folds: Number(/fold (\d+)%/.exec(o.basis)![1]) }));
+
+    if (raises.length >= 2) {
+      const sorted = [...raises].sort((a, b) => a.amount - b.amount);
+      expect(sorted[sorted.length - 1]!.folds).toBeGreaterThanOrEqual(sorted[0]!.folds);
+    }
+    expect(raises[0]!.folds).toBeGreaterThan(0);
   });
 
   it('calls a decision close when the edge is inside the noise', () => {

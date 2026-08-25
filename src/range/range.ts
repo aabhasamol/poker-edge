@@ -47,8 +47,16 @@ export class Range {
    * class is then included at a fractional weight. That models a threshold
    * honestly — a player at "the top 15%" plays the marginal class sometimes,
    * not always — and makes the function continuous in `percent`.
+   *
+   * `tail` softens the boundary instead of cutting it dead. Without it, a hand
+   * one place outside the nominal range has weight ZERO — the model asserting
+   * the player cannot hold it. Real ranges are not like that, and the assertion
+   * is unrecoverable: no amount of later betting can reintroduce a holding that
+   * was ruled impossible pre-flop. That is precisely how a limper who turned up
+   * with J-6 offsuit came to be assigned a probability of zero, and hero was
+   * told to fold a straight.
    */
-  static topPercent(percent: number): Range {
+  static topPercent(percent: number, tail = 0): Range {
     const target = clamp(percent, 0, 100) / 100;
     const weights = new Float64Array(COMBO_COUNT);
     if (target <= 0) return new Range(weights);
@@ -59,12 +67,25 @@ export class Range {
     for (const [key] of PREFLOP_STRENGTH) {
       const indices = comboIndicesForClass(key);
       const share = indices.length / totalCombos;
-      const remaining = target - used / totalCombos;
-      if (remaining <= 0) break;
+      const position = used / totalCombos;
+      const remaining = target - position;
 
-      const weight = remaining >= share ? 1 : (remaining / share);
+      let weight: number;
+      if (remaining >= share) {
+        weight = 1;
+      } else if (remaining > 0) {
+        // Straddling the boundary: part inside, the rest decayed.
+        const inside = remaining / share;
+        weight = inside + (1 - inside) * decay(0, tail);
+      } else if (tail > 0) {
+        weight = decay(position - target, tail);
+      } else {
+        break;
+      }
+
       for (const index of indices) weights[index] = weight;
-      used += indices.length * weight;
+      used += indices.length;
+      if (weight < 0.01 && remaining < 0) break;
     }
     return new Range(weights);
   }
@@ -207,6 +228,16 @@ export class Range {
     }
     return totals;
   }
+}
+
+/**
+ * How much weight survives `distance` past the edge of a range, where distance
+ * is measured as a share of all starting hands. Exponential, so the tail thins
+ * quickly but never quite reaches zero.
+ */
+function decay(distance: number, tail: number): number {
+  if (tail <= 0) return 0;
+  return Math.exp(-Math.max(0, distance) / tail);
 }
 
 const RANK_ORDER = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];

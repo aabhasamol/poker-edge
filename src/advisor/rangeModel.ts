@@ -103,7 +103,7 @@ function preflopRange(
 
   if (raised.length > 0 && facedVoluntaryRaise) {
     reasoning.push(`Re-raised pre-flop: top ${tendencies.threeBetPercent.toFixed(1)}% of hands.`);
-    return Range.topPercent(tendencies.threeBetPercent);
+    return Range.topPercent(tendencies.threeBetPercent, tailFor(tendencies.threeBetPercent) * 0.5);
   }
 
   if (raised.length > 0) {
@@ -111,7 +111,7 @@ function preflopRange(
     reasoning.push(
       `Opened for a raise${position ? ` from ${position}` : ''}: top ${percent.toFixed(1)}% of hands.`,
     );
-    return Range.topPercent(percent);
+    return Range.topPercent(percent, tailFor(percent));
   }
 
   if (called) {
@@ -126,16 +126,31 @@ function preflopRange(
         : `Entered for the minimum: top ${percent.toFixed(1)}% of hands.`,
     );
     // A caller rarely holds the very top of their range — those re-raise.
-    const capped = Range.topPercent(percent).reweight((index, weight) => {
-      const strongest = Range.topPercent(tendencies.threeBetPercent * 0.6);
-      return strongest.weightAt(index) > 0 ? weight * 0.35 : weight;
-    });
-    return capped;
+    const strongest = Range.topPercent(tendencies.threeBetPercent * 0.6);
+    return Range.topPercent(percent, tailFor(percent)).reweight((index, weight) =>
+      strongest.weightAt(index) > 0 ? weight * 0.35 : weight,
+    );
   }
 
   reasoning.push('Checked their option pre-flop: any two cards, weighted to the weaker end.');
   // A big blind who never voluntarily invested skews weak.
-  return Range.uniform().reweight((index) => (Range.topPercent(15).weightAt(index) > 0 ? 0.5 : 1));
+  const premium = Range.topPercent(15);
+  return Range.uniform().reweight((index) => (premium.weightAt(index) > 0 ? 0.5 : 1));
+}
+
+/**
+ * How fuzzy the edge of a range is, as a share of all starting hands.
+ *
+ * Wider ranges have fuzzier edges: a player entering two thirds of hands has no
+ * crisp bottom to their range, while a player who opens 8% genuinely does have
+ * a line they will not cross. A three-bet is the crispest of all.
+ */
+function tailFor(percent: number): number {
+  return 0.08 + 0.4 * (clamp(percent, 0, 100) / 100);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function openPercentFor(position: Position | null, tendencies: Tendencies): number {
@@ -222,9 +237,15 @@ function strengthPercentiles(
  * a floor under the weakest holdings. Without it the model concludes that any
  * bet beats hero, which is both wrong and the single most expensive mistake a
  * range model can make.
+ *
+ * How far a bet narrows the range is set by what this player actually turns up
+ * with after betting. A fixed cut-off treats everyone's bet as meaning the same
+ * thing, and it does not: against someone whose bets keep arriving with one
+ * pair, reading every raise as near-nut strength folds winners.
  */
 function betWeight(percentile: number, tendencies: Tendencies): number {
-  const value = logistic(percentile, 0.62, 0.12);
+  const midpoint = clamp(0.28 + 0.72 * tendencies.showdownStrength, 0.3, 0.78);
+  const value = logistic(percentile, midpoint, 0.14);
   return Math.max(tendencies.bluffFrequency * (1 - percentile), value);
 }
 

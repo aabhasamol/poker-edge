@@ -436,6 +436,29 @@ the pot down every time, there is no evidence to learn from — and the panel's
 "speculative" label on post-flop advice is doing real work in exactly those
 spots.
 
+### No holding is impossible
+
+A range is a weighting, not a membership test. Modelling a limper as "the top
+32% of hands" assigns everything outside weight ZERO — the model asserting the
+player cannot hold it — and the assertion is unrecoverable, because no amount of
+later betting can reintroduce a hand ruled out pre-flop.
+
+That is not a hypothetical. In a real session an opponent limped, raised the
+flop and shoved the turn holding J-6 offsuit. J-6o sits outside the top 32%, so
+it carried weight zero from his first action onward; the model gave him queens
+and flushes, put hero at 32% equity holding a made straight, and advised folding.
+Hero called and won the session with it. The true equity was 73.9%.
+
+Ranges now have a soft edge that decays rather than stopping, and it is wider
+for looser players — someone entering two thirds of hands has no crisp bottom to
+their range, while a player opening 8% genuinely does.
+
+The second half of the same failure: how far a bet narrows a range must depend
+on the player. A fixed cut-off treats everyone's bet as meaning the same thing.
+It is now set by what they actually turn up with after betting, measured at
+showdown — because a player whose bets keep arriving with one pair is not
+representing the nuts, whatever the size of the bet.
+
 ### What the advisor will not tell you
 
 Expected values are in chips, relative to folding now; chips already in the pot

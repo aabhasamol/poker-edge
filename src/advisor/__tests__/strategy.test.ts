@@ -97,9 +97,11 @@ describe('mixing to stay unreadable', () => {
     expect(trapThresholdFor(TIGHT, 10)).toBeGreaterThanOrEqual(0.45);
   });
 
-  it('traps with kings heads-up but not four-handed', () => {
+  it('needs a bigger edge to disguise a hand as the field grows', () => {
+    // Kings heads-up are a clear favourite and worth hiding; queens four-handed
+    // are not, because equity concedes ground as more players contest the pot.
     expect(adviseWith(headsUp('Ks Kd'), TIGHT).mix.some((e) => e.action === 'call')).toBe(true);
-    expect(adviseWith(facingOpen('Ks Kd'), TIGHT).mix.some((e) => e.action === 'call')).toBe(false);
+    expect(adviseWith(facingOpen('Qs Qh'), TIGHT).mix.some((e) => e.action === 'call')).toBe(false);
   });
 
   it('never mixes under a loose profile', () => {
