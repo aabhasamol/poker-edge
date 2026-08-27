@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/affaan-m/ecc/main/schemas/ecc-install-config.schema.json",
+  "version": 1,
+  "target": "claude-project",
+  "modules": [
+    "rules-core",
+    "agents-core",
+    "commands-core",
+    "hooks-runtime",
+    "platform-configs",
+    "workflow-quality"
+  ],
+  "include": [
+    "lang:typescript",
+    "framework:react"
+  ],
+  "options": {
+    "eccRef": "v2.2.0",
+    "skills": [
+      "coding-standards",
+      "frontend-patterns",
+      "react-patterns",
+      "react-testing",
+      "react-performance",
+      "vite-patterns",
+      "security-review",
+      "benchmark",
+      "search-first"
+    ]
+  }
+}
