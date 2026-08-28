@@ -44,8 +44,23 @@ export const VARIANTS: Record<VariantId, VariantSpec> = {
   omaha: OMAHA,
 };
 
+/**
+ * The spec for a variant id.
+ *
+ * Throws on an id the engine does not know rather than returning undefined:
+ * the value can arrive from a structured-cloned worker message or stored state,
+ * and a missing spec used to surface as `Cannot read properties of undefined`
+ * from deep inside the evaluator, several layers from the actual cause.
+ * `validateGameState` checks the id first, so the UI never reaches this throw.
+ */
 export function getVariant(id: VariantId): VariantSpec {
-  return VARIANTS[id];
+  const spec = VARIANTS[id];
+  if (!spec) {
+    throw new Error(
+      `Unknown variant "${String(id)}"; expected one of ${Object.keys(VARIANTS).join(', ')}.`,
+    );
+  }
+  return spec;
 }
 
 /**

@@ -90,10 +90,12 @@ export interface Advice {
  * How often hero is already beaten, and how often a hand that is currently
  * behind gets there.
  *
- * These come from the engine's own threat analysis, but computed against the
- * MODELLED ranges rather than random cards — the same correction that applies
- * to equity. "One opponent in three has you beaten" means something different
- * when that opponent has been raising.
+ * These come from the engine's own threat analysis, which deals opponents
+ * uniformly random legal cards — NOT the modelled ranges the advice itself
+ * uses. "One opponent in three has you beaten" means something different when
+ * that opponent has been raising, so the difference is stated in a caveat
+ * rather than papered over: they sit next to range-aware numbers and would
+ * otherwise be read as the same kind of quantity.
  */
 function summariseThreats(
   state: GameState,
@@ -103,7 +105,7 @@ function summariseThreats(
   if (ranges.length === 0 || equity.impossible) return { behindNow: null, drawOutRisk: null };
   if (state.board.length < 3) return { behindNow: null, drawOutRisk: null };
 
-  const behind = currentThreats({ ...state, activePlayers: state.activePlayers });
+  const behind = currentThreats(state);
   const future = futureThreats(state, { samples: 4_000 });
 
   return {
@@ -142,6 +144,28 @@ export function advise(
   state: GameState,
   options: AdviceOptions = {},
 ): Advice {
+  /*
+   * Two premises the rest of this function cannot check for itself.
+   *
+   * A hero who is not seated used to be priced with a stack of zero, which
+   * made calling free and every comparison against it meaningless. An Omaha
+   * table used to be answered with opponents holding two cards against hero's
+   * four. Both produce confident numbers about a hand nobody is playing, and
+   * for a premise that does not hold a refusal is the only honest output.
+   */
+  const hero = hand.players.find((player) => player.id === heroId);
+  if (!hero) {
+    throw new Error(
+      `Hero "${heroId}" is not seated in this hand, so there is no decision to advise on.`,
+    );
+  }
+  if (state.variant !== 'texas' || hand.variant !== 'texas') {
+    throw new Error(
+      `The advisor models two-card hold'em ranges only, so it cannot advise on ` +
+        `${getVariant(hand.variant).name}. The engine's own analysis still applies.`,
+    );
+  }
+
   // An explicit single `tendencies` still works and applies to everyone; a
   // lookup is what profiles supply.
   const tendenciesFor: TendenciesLookup =
@@ -155,8 +179,19 @@ export function advise(
 
   const pot = state.potSize ?? hand.pot;
   const toCall = amountToCall(hand, heroId);
-  const hero = hand.players.find((player) => player.id === heroId);
-  const heroStack = hero?.stack ?? 0;
+
+  /*
+   * A stack the log never stated cannot cap anything. Reading it as zero chips
+   * is what made a call look free, so an unknown stack is priced at exactly the
+   * call in front of hero: the call costs its real price, and no raise size is
+   * offered on a number nobody knows.
+   */
+  const heroStack = hero.stackKnown ? hero.stack : toCall;
+  if (!hero.stackKnown) {
+    caveats.push(
+      "Hero's stack is not in the log yet, so no raise sizes are offered and only the call is priced.",
+    );
+  }
 
   const equity =
     ranges.length > 0
@@ -365,6 +400,11 @@ export function advise(
           : 'clear';
 
   const threats = summariseThreats(state, ranges, equity);
+  if (threats.behindNow !== null || threats.drawOutRisk !== null) {
+    caveats.push(
+      'Being-behind and draw-out numbers deal opponents random cards, not the modelled ranges, so they read differently from the equity above.',
+    );
+  }
 
   return {
     recommendation: best.action,

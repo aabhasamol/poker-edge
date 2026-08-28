@@ -24,6 +24,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * The line's sequence number, or null when the payload does not really carry
+ * one.
+ *
+ * `Number(null)` is 0 and so is `Number('')`, so coercing whatever the field
+ * holds stamped every line of a feed with a null `order` column as sequence
+ * zero. Downstream that is worse than having no sequence at all: the session
+ * de-duplicates by order, sees the same number on every line, and drops all
+ * but the first — the panel then sits on one hand forever while the table
+ * plays on. Only a whole number, or a string that is exactly one, counts.
+ */
+function sequenceNumber(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isSafeInteger(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
  * Convert a `/log` response body into log lines, oldest first.
  *
  * The endpoint serves newest-first. The reversal matters because timestamps
@@ -43,11 +61,11 @@ export function fromLogResponse(body: unknown): LogLine[] {
     const at = entry.created_at;
     // The CSV export carries an `order` column; if the live feed ever does
     // too, it takes precedence over any positional guess.
-    const order = typeof entry.order === 'number' ? entry.order : Number(entry.order);
+    const order = sequenceNumber(entry.order);
     lines.push({
       msg,
       ...(typeof at === 'string' ? { at } : {}),
-      ...(Number.isSafeInteger(order) ? { order } : {}),
+      ...(order !== null ? { order } : {}),
     });
   }
   return lines.reverse();

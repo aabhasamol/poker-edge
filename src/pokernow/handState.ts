@@ -30,6 +30,15 @@ export interface PlayerState {
   readonly startingStack: number;
   /** Chips still behind. */
   readonly stack: number;
+  /**
+   * Whether the log ever stated this player's stack.
+   *
+   * False when the player was first seen in an action line — the panel opened
+   * mid-hand, or the feed trimmed its history — so `stack` is a placeholder,
+   * not a count. Zero chips and an unknown number of chips lead to opposite
+   * conclusions about whether anyone can still bet.
+   */
+  readonly stackKnown: boolean;
   readonly committedStreet: number;
   readonly committedTotal: number;
   readonly status: PlayerStatus;
@@ -105,6 +114,7 @@ interface MutablePlayer {
   seat: number;
   startingStack: number;
   stack: number;
+  stackKnown: boolean;
   committedStreet: number;
   committedTotal: number;
   status: PlayerStatus;
@@ -309,7 +319,7 @@ export class HandTracker {
     } else {
       this.antes += delta;
     }
-    if (player.stack <= 0) player.status = 'allIn';
+    if (player.stackKnown && player.stack <= 0) player.status = 'allIn';
   }
 
   private applyAction(event: Extract<PokerNowEvent, { kind: 'action' }>): void {
@@ -347,7 +357,7 @@ export class HandTracker {
       event.action === 'call' &&
       player.committedStreet < this.currentBet &&
       !event.allIn &&
-      player.stack > 0
+      (!player.stackKnown || player.stack > 0)
     ) {
       this.diagnostics.push(
         `${player.name} called to ${player.committedStreet} against a bet of ${this.currentBet} ` +
@@ -355,7 +365,11 @@ export class HandTracker {
       );
     }
 
-    if (event.allIn || player.stack <= 0) {
+    // An unknown stack must never be read as an empty one: a player the log
+    // never priced would otherwise be declared all in the moment they act,
+    // and the panel would believe nobody at the table can bet again.
+    const spent = player.stackKnown && player.stack <= 0;
+    if (event.allIn || spent) {
       if (player.status !== 'folded') player.status = 'allIn';
       player.stack = Math.max(0, player.stack);
     }
@@ -368,7 +382,7 @@ export class HandTracker {
       action: event.action,
       added,
       to: player.committedStreet,
-      allIn: event.allIn || player.stack <= 0,
+      allIn: event.allIn || spent,
       potBefore,
       toCallBefore,
       activeBefore,
@@ -383,7 +397,7 @@ export class HandTracker {
   private ensurePlayer(ref: PlayerRef): MutablePlayer {
     const existing = this.players.get(ref.id);
     if (existing) return existing;
-    const created = newPlayer(ref, this.seatOrder.length + 1, 0);
+    const created = newPlayer(ref, this.seatOrder.length + 1, 0, false);
     this.players.set(ref.id, created);
     this.seatOrder.push(ref.id);
     return created;
@@ -465,6 +479,7 @@ export class HandTracker {
         position: this.positions.get(p.id) ?? null,
         startingStack: p.startingStack,
         stack: p.stack,
+        stackKnown: p.stackKnown,
         committedStreet: p.committedStreet,
         committedTotal: p.committedTotal,
         status: p.status,
@@ -495,13 +510,19 @@ export class HandTracker {
   }
 }
 
-function newPlayer(ref: PlayerRef, seat: number, stack: number): MutablePlayer {
+function newPlayer(
+  ref: PlayerRef,
+  seat: number,
+  stack: number,
+  stackKnown = true,
+): MutablePlayer {
   return {
     id: ref.id,
     name: ref.name,
     seat,
     startingStack: stack,
     stack,
+    stackKnown,
     committedStreet: 0,
     committedTotal: 0,
     status: 'active',
@@ -516,11 +537,20 @@ export function findPlayer(hand: LiveHand, playerId: string): PlayerState | null
   return hand.players.find((p) => p.id === playerId) ?? null;
 }
 
-/** What `playerId` must put in to continue. */
+/**
+ * What `playerId` must put in to continue.
+ *
+ * The price is capped by the stack only when the stack is actually known: a
+ * player registered from an action line carries a placeholder of zero, and
+ * clamping to that reports every call as free — the most dangerous wrong
+ * answer this module can give, because pot odds, EV and the recommendation all
+ * inherit it without complaint.
+ */
 export function amountToCall(hand: LiveHand, playerId: string): number {
   const player = findPlayer(hand, playerId);
   if (!player) return 0;
-  return Math.max(0, Math.min(hand.currentBet - player.committedStreet, player.stack));
+  const owed = Math.max(0, hand.currentBet - player.committedStreet);
+  return player.stackKnown ? Math.min(owed, player.stack) : owed;
 }
 
 /** Players who have not folded, including those already all-in. */

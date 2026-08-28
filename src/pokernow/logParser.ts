@@ -55,7 +55,12 @@ function parseCardList(text: string): Card[] | null {
 
 function parseAmount(text: string | undefined): number | null {
   if (text === undefined) return null;
-  const n = Number(text.replace(/,/g, ''));
+  const digits = text.replace(/,/g, '');
+  // `Number('')` is 0, so a run of separators with no digit in it — which the
+  // `[\d.,]+` matchers happily accept — used to parse as a real amount of
+  // nothing, turning a corrupted line into a pot award of zero chips.
+  if (!/\d/.test(digits)) return null;
+  const n = Number(digits);
   return Number.isFinite(n) ? n : null;
 }
 

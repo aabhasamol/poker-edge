@@ -8,7 +8,7 @@
  */
 
 import { Card, cardToString, findDuplicates } from './card';
-import { VariantId, getVariant } from './variant';
+import { VariantId, VARIANTS } from './variant';
 
 export interface GameState {
   readonly variant: VariantId;
@@ -42,7 +42,20 @@ export function opponentCount(state: GameState): number {
  */
 export function validateGameState(state: GameState): ValidationResult {
   const errors: string[] = [];
-  const variant = getVariant(state.variant);
+
+  // The variant decides how many hole cards are legal, so nothing else can be
+  // checked without it. An unrecognised id is reported here rather than left to
+  // throw from inside the evaluator, which is how a stale message or a corrupt
+  // stored state used to take the whole panel down.
+  const variant = VARIANTS[state.variant];
+  if (!variant) {
+    return {
+      ok: false,
+      errors: [
+        `Unknown variant "${String(state.variant)}"; expected one of ${Object.keys(VARIANTS).join(', ')}.`,
+      ],
+    };
+  }
 
   // --- Player counts ---
   if (!Number.isInteger(state.totalPlayers) || state.totalPlayers < 2) {

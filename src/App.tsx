@@ -77,7 +77,7 @@ export function App() {
     [variant, totalPlayers, activePlayers, hole, board, potNum, callNum],
   );
 
-  const { analysis, computing } = useAnalysis(state);
+  const { analysis, computing, error } = useAnalysis(state);
   const canSave = !!analysis && analysis.validation.ok;
 
   function handleSave() {
@@ -118,7 +118,20 @@ export function App() {
           allCards={allCards}
         />
 
-        <Dashboard analysis={analysis} computing={computing} onSave={handleSave} canSave={canSave} />
+        {error ? (
+          // An engine or worker failure is shown, never swallowed: silence
+          // here reads as "still calculating" and never resolves.
+          <div className="panel dashboard">
+            <div className="section">
+              <h2>Analysis failed</h2>
+              <ul className="errors">
+                <li>{error}</li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <Dashboard analysis={analysis} computing={computing} onSave={handleSave} canSave={canSave} />
+        )}
 
         <HistoryPanel
           entries={history}
