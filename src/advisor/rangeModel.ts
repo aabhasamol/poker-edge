@@ -28,9 +28,33 @@ import { comboCards, comboFromIndex } from '../range/combos';
 import { Range } from '../range/range';
 import { POOL_DEFAULTS, Tendencies } from './tendencies';
 
+/**
+ * The parts of a range a reader needs, as plain data.
+ *
+ * Advice reaches the panel through `postMessage`, which structured-clones:
+ * data crosses, prototypes do not. `range` therefore arrives as an object with
+ * no methods, and a component that calls one throws during render — which
+ * unmounts the whole panel rather than breaking one section. Everything the UI
+ * displays is computed here, while the Range is still a Range.
+ */
+export interface RangeSummary {
+  /** Combinations left in the range after card removal. */
+  readonly comboCount: number;
+  /**
+   * Starting-hand classes by weight, heaviest first. Capped because the panel
+   * shows the top handful and the whole table would be sent on every decision.
+   */
+  readonly classes: readonly { readonly label: string; readonly weight: number }[];
+}
+
+/** How many classes to carry across the boundary; the panel renders twelve. */
+const SUMMARY_CLASS_LIMIT = 24;
+
 export interface RangeExplanation {
-  /** The modelled range. */
+  /** The modelled range. Methods do not survive the worker boundary. */
   readonly range: Range;
+  /** The same range as plain data, for anything past that boundary. */
+  readonly summary: RangeSummary;
   /** Share of all starting hands it covers, after card removal. */
   readonly fraction: number;
   /** Plain-language account of how it was derived, in order. */
@@ -65,7 +89,22 @@ export function modelOpponentRange(
   if (final.isEmpty()) {
     reasoning.push('No holding survives — the read is inconsistent with the cards on show.');
   }
-  return { range: final, fraction: final.fraction(), reasoning, wellFounded };
+  return {
+    range: final,
+    summary: summarise(final),
+    fraction: final.fraction(),
+    reasoning,
+    wellFounded,
+  };
+}
+
+/** Freeze the display view of a range while its methods still exist. */
+function summarise(range: Range): RangeSummary {
+  const classes = [...range.byClass().entries()]
+    .map(([label, weight]) => ({ label, weight }))
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, SUMMARY_CLASS_LIMIT);
+  return { comboCount: range.comboCount(), classes };
 }
 
 // --- Pre-flop --------------------------------------------------------------

@@ -322,20 +322,28 @@ export function Players({ advice, hand, profileFor, tagOf, onTag }: PlayersProps
  * what he can have" is actionable and "AKs has weight 3.2" is not.
  */
 function LikelyHands({ explanation }: { explanation: RangeExplanation }) {
-  const total = explanation.range.comboCount();
+  /*
+   * Read from the summary, never from the Range itself. The advice arrives by
+   * `postMessage`, which clones data but not prototypes, so `range` has no
+   * methods here — calling one threw during render and took the entire panel
+   * down with it, leaving a blank side panel over a live table.
+   */
+  const total = explanation.summary.comboCount;
   if (total <= 0) return <p className="player-reasoning">Nothing consistent with the action.</p>;
 
-  const top = [...explanation.range.byClass().entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12);
-  const shown = top.reduce((sum, [, weight]) => sum + weight, 0) / total;
+  const top = explanation.summary.classes.slice(0, 12);
+  const shown = top.reduce((sum, entry) => sum + entry.weight, 0) / total;
 
   return (
     <>
       <div className="hand-grid">
-        {top.map(([key, weight]) => (
-          <span key={key} className="hand-chip" title={`${((weight / total) * 100).toFixed(1)}% of their range`}>
-            {key}
+        {top.map(({ label, weight }) => (
+          <span
+            key={label}
+            className="hand-chip"
+            title={`${((weight / total) * 100).toFixed(1)}% of their range`}
+          >
+            {label}
             <em>{((weight / total) * 100).toFixed(0)}%</em>
           </span>
         ))}
