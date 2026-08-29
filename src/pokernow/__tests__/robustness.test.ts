@@ -122,6 +122,72 @@ describe('players whose stack the log never stated', () => {
   });
 });
 
+describe('whoever is sitting at the table', () => {
+  /*
+   * Nothing here is hero-specific: the tool belongs to whoever opens it, and
+   * the seat is resolved from a name that arrives either from a guess at the
+   * page or from a person typing it. Both spellings are unreliable, so the
+   * match has to be.
+   */
+  const lines = [
+    '-- starting hand #9 (id: t9)  No Limit Texas Hold\'em (dealer: "Grondo20 @ g20") --',
+    'Player stacks: #1 "Grondo20 @ g20" (1770) | #2 "Darknight @ dkn" (3560) | #3 "Pitamber @ pit" (2640)',
+    '"Darknight @ dkn" posts a small blind of 10',
+    '"Pitamber @ pit" posts a big blind of 20',
+  ];
+
+  function heroIdFor(name: string): string | null {
+    const session = new LogSession({ heroName: name });
+    session.ingest(lines.map((msg, order) => ({ msg, order })));
+    return session.heroId;
+  }
+
+  it('seats a different player as hero when that is who is playing', () => {
+    expect(heroIdFor('Darknight')).toBe('dkn');
+    expect(heroIdFor('Pitamber')).toBe('pit');
+  });
+
+  it('is not thrown by capitals or stray spaces in the name', () => {
+    // A DOM guess picks up whitespace; a person types lowercase. Matching
+    // exactly used to leave the panel with no hero and no explanation.
+    expect(heroIdFor('  darknight ')).toBe('dkn');
+    expect(heroIdFor('DARKNIGHT')).toBe('dkn');
+  });
+
+  it('leaves hero unset when the name is nobody at the table', () => {
+    expect(heroIdFor('Someone Else')).toBeNull();
+  });
+
+  function heroIdFrom(options: { heroId?: string; heroName?: string }): string | null {
+    const session = new LogSession(options);
+    session.ingest(lines.map((msg, order) => ({ msg, order })));
+    return session.heroId;
+  }
+
+  /*
+   * An id read off the page is a guess like any other: the extension digs it
+   * out of an attribute whose format is not ours, so it can arrive wrapped
+   * (`player-dkn`) or belong to a table that has since been left. Taking it on
+   * trust seats hero as a player who is not there, and — unlike a bad name —
+   * nothing downstream ever revisits it.
+   */
+  it('accepts an id that is actually sitting at the table', () => {
+    expect(heroIdFrom({ heroId: 'dkn' })).toBe('dkn');
+  });
+
+  it('recovers the id from an attribute value that wrapped it', () => {
+    expect(heroIdFrom({ heroId: 'player-dkn' })).toBe('dkn');
+  });
+
+  it('discards an id belonging to nobody here rather than seating a ghost', () => {
+    expect(heroIdFrom({ heroId: 'stale-table-id' })).toBeNull();
+  });
+
+  it('falls back to the name when the id turns out to be wrong', () => {
+    expect(heroIdFrom({ heroId: 'stale-table-id', heroName: 'Darknight' })).toBe('dkn');
+  });
+});
+
 describe('amounts that are not amounts', () => {
   it('does not read a bare separator as a chip count', () => {
     // `Number(',')` after comma-stripping is `Number('')`, which is 0 — so a
