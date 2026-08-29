@@ -17,7 +17,7 @@
  */
 
 import { LogPoller, gameIdFromUrl, makeLogFetcher } from '../../src/pokernow/poller';
-import { findHeroName } from './dom';
+import { findHeroSeat } from './dom';
 import { extensionAlive, guarded } from './lifecycle';
 import { ExtensionMessage, HandMessage, STORAGE_KEY, StatusMessage } from './messages';
 
@@ -45,7 +45,22 @@ declare global {
 let activeGameId: string | null = null;
 let poller: LogPoller | null = null;
 let latest: HandMessage | null = null;
+/*
+ * Who "hero" is, in order of authority.
+ *
+ * `heroId` is read off the page, and is the answer whenever the page gives it:
+ * whoever loaded the extension is hero by definition, because their browser
+ * session is the only reason the log states any hole cards at all. It is
+ * deliberately never persisted — a stored id would follow the machine rather
+ * than the account, and be wrong for the next person to sit down.
+ *
+ * `heroName` is the fallback for pages that do not expose an id, and
+ * `heroPinned` records that a person answered the panel's prompt, which stops
+ * the page guess from overruling them.
+ */
+let heroId: string | null = null;
 let heroName: string | null = null;
+let heroPinned = false;
 let watchTimer: ReturnType<typeof setInterval> | null = null;
 
 /*
@@ -74,7 +89,10 @@ function attach(): void {
       .get(`${STORAGE_KEY}.heroName`)
       .then((stored) => {
         const saved = stored[`${STORAGE_KEY}.heroName`];
-        if (typeof saved === 'string') heroName = saved;
+        if (typeof saved === 'string' && saved.trim()) {
+          heroName = saved;
+          heroPinned = true;
+        }
         syncToUrl();
       })
       .catch(() => shutdown());
@@ -116,7 +134,10 @@ function onPanelMessage(message: ExtensionMessage): void {
     else publish(currentStatus());
   }
   if (message.type === 'setHero') {
+    // A person overriding the page's answer is the one thing that outranks it.
     heroName = message.heroName;
+    heroId = null;
+    heroPinned = true;
     guarded(() => {
       void chrome.storage.local
         .set({ [`${STORAGE_KEY}.heroName`]: message.heroName })
@@ -153,23 +174,39 @@ function stop(): void {
   poller?.stop();
   poller = null;
   latest = null;
+  // A PokerNow player id belongs to one table, not to the account, so it is
+  // dropped whenever the reader stops and re-read from whatever page is next.
+  heroId = null;
 }
 
 function start(id: string): void {
-  if (!heroName) heroName = findHeroName(document);
+  readOwnSeat();
 
   poller = new LogPoller({
+    ...(heroId ? { heroId } : {}),
     ...(heroName ? { heroName } : {}),
     fetchLines: makeLogFetcher(id),
     onUpdate: (update) => {
-      // The seat may not have rendered when the reader first started.
-      if (!heroName) heroName = findHeroName(document);
+      // The seat may not have rendered when the reader first started. Finding
+      // the id late is worth a restart: the session resolves hero once, from
+      // the seat roster, so a poller built without one never picks it up.
+      const hadId = heroId;
+      readOwnSeat();
+      if (heroId !== hadId) {
+        // Not inline: this is the poller's own callback, and restarting
+        // disposes the poller that is currently running it.
+        setTimeout(restart, 0);
+        return;
+      }
 
       latest = {
         type: 'hand',
         gameId: id,
         hand: update.current,
         completed: update.completed,
+        // The session's answer, not the page's: an id scraped from an
+        // attribute is only adopted once a seat roster confirms it belongs to
+        // someone actually at this table.
         heroId: update.heroId,
         heroNameGuess: heroName,
         at: Date.now(),
@@ -211,6 +248,18 @@ function start(id: string): void {
  * panel cannot tell a reader that has nothing to say from one that was never
  * injected, and those need very different fixes.
  */
+/**
+ * Re-read hero's own seat from the page, without overruling a person who has
+ * already said who they are. Cheap enough to repeat: a handful of failed
+ * `querySelector` calls once the answer is in hand.
+ */
+function readOwnSeat(): void {
+  if (heroPinned || (heroId && heroName)) return;
+  const seat = findHeroSeat(document);
+  if (!heroId) heroId = seat.id;
+  if (!heroName) heroName = seat.name;
+}
+
 function currentStatus(): StatusMessage {
   if (activeGameId === null) {
     return {

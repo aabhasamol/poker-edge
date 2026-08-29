@@ -137,8 +137,10 @@ function Panel() {
       {heroId === null && hand !== null && (
         <HeroPrompt
           guess={heroNameGuess}
+          seats={hand.players.map((player) => player.name)}
           value={nameInput}
           onChange={setNameInput}
+          onPick={(name) => void sendToTable({ type: 'setHero', heroName: name })}
           onSubmit={() => {
             const name = nameInput.trim() || heroNameGuess || '';
             if (name) void sendToTable({ type: 'setHero', heroName: name });
@@ -256,15 +258,28 @@ function NoReader() {
   );
 }
 
+/**
+ * Ask whose seat this is.
+ *
+ * The seats are offered as buttons rather than asked for as text: the roster
+ * is right there in the hand, and typing a name that has to match the table
+ * exactly is a step where a new user simply fails — a trailing space or a
+ * lowercase letter used to leave the panel silently heroless. Typing still
+ * works for the case where the roster has not arrived yet.
+ */
 function HeroPrompt({
   guess,
+  seats,
   value,
   onChange,
+  onPick,
   onSubmit,
 }: {
   guess: string | null;
+  seats: readonly string[];
   value: string;
   onChange: (value: string) => void;
+  onPick: (name: string) => void;
   onSubmit: () => void;
 }) {
   return (
@@ -272,10 +287,27 @@ function HeroPrompt({
       <h3 className="card-title">Which player are you?</h3>
       <p className="faint">
         The log never says which seat is yours.
-        {guess ? ` The page looks like "${guess}".` : ' Type it exactly as it appears at the table.'}
+        {guess ? ` The page looks like "${guess}".` : ''}
       </p>
+
+      {seats.length > 0 && (
+        <div className="segmented" style={{ flexWrap: 'wrap' }}>
+          {seats.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className={name === guess ? 'is-active' : ''}
+              onClick={() => onPick(name)}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <form
         className="field"
+        style={{ marginTop: 8 }}
         onSubmit={(event) => {
           event.preventDefault();
           onSubmit();
@@ -283,7 +315,7 @@ function HeroPrompt({
       >
         <input
           value={value}
-          placeholder={guess ?? 'Your table name'}
+          placeholder={guess ?? 'Or type your table name'}
           onChange={(event) => onChange(event.target.value)}
         />
         <button type="submit">Set</button>
