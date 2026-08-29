@@ -353,6 +353,18 @@ function betWeight(percentile: number, tendencies: Tendencies, sizeRatio: number
    * moving it up with size is exactly the separating pressure above.
    */
   const midpoint = clamp(0.28 + 0.72 * tendencies.showdownStrength + 0.3 * size, 0.3, 0.94);
+
+  /*
+   * The slope has to tighten as the signal gets louder, or the cut never bites.
+   *
+   * Measured on a real hand: after a pot-and-a-third raise onto a three-flush
+   * board, a fixed slope of 0.14 gave a flush only about twice the weight of
+   * top pair — and top pair outnumbers the flush combinations roughly twenty
+   * to one, so the posterior stayed almost entirely top pair and hero's
+   * nine-high flush was scored at 86%. Separation is not just about where the
+   * cut sits but how sharp it is, and a high-intensity signal separates
+   * sharply: that is what makes it unprofitable to mimic.
+   */
   const value = logistic(percentile, midpoint, 0.14);
 
   /*
