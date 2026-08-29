@@ -45,6 +45,28 @@ export interface PollerOptions extends SessionOptions {
   readonly now?: () => number;
 }
 
+/**
+ * A log request the server answered with an error status.
+ *
+ * The status is carried rather than flattened into a message so the retry
+ * schedule can tell a refusal — 403 or 429, meaning stop asking — from a
+ * server slip or a transport failure, which are worth retrying promptly.
+ */
+export class LogRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`log request failed: ${status}`);
+    this.name = 'LogRequestError';
+    this.status = status;
+  }
+
+  /** True when the server is turning the reader away rather than failing. */
+  get refused(): boolean {
+    return this.status === 403 || this.status === 429;
+  }
+}
+
 export interface PollerUpdate {
   readonly current: LiveHand;
   readonly completed: readonly LiveHand[];
@@ -53,7 +75,25 @@ export interface PollerUpdate {
   readonly applied: number;
 }
 
-const DEFAULT_INTERVAL_MS = 1_000;
+/*
+ * Gap between polls.
+ *
+ * One second is sixty requests a minute against a server nobody here owns,
+ * and PokerNow answers a reader that keeps that up with 403s — at which point
+ * the tool shows nothing at all. Three seconds cuts the traffic by two thirds
+ * and costs at most three seconds of lag behind the table, which is inside
+ * the time any decision actually takes. Focusing the tab still forces an
+ * immediate read, so coming back to a hand is not spent waiting.
+ */
+const DEFAULT_INTERVAL_MS = 3_000;
+
+/**
+ * Floor for the retry delay after the server refuses outright.
+ *
+ * A 403 or 429 is not "try again shortly", it is "stop asking". Retrying on
+ * the ordinary schedule is what turns a brief rate limit into a long lockout.
+ */
+const REFUSED_MIN_DELAY_MS = 15_000;
 /*
  * Backoff ceiling. Kept low on purpose: a table that comes back has to be
  * noticed quickly, and at a 30-second ceiling the reader could sit idle for
@@ -72,6 +112,8 @@ export class LogPoller {
   private failures = 0;
   /** When the current run of failures began; null while reads are working. */
   private failingSince: number | null = null;
+  /** True when the last failure was the server refusing, not a transport error. */
+  private refused = false;
 
   constructor(options: PollerOptions) {
     this.options = options;
@@ -124,6 +166,7 @@ export class LogPoller {
       const wasFailing = this.failures > 0;
       this.failures = 0;
       this.failingSince = null;
+      this.refused = false;
       // Announced before the update, so a caller showing an outage clears it
       // even on a poll that brings nothing new.
       if (wasFailing) this.options.onRecover?.();
@@ -139,6 +182,7 @@ export class LogPoller {
     } catch (error) {
       const now = (this.options.now ?? Date.now)();
       if (this.failingSince === null) this.failingSince = now;
+      this.refused = error instanceof LogRequestError && error.refused;
       this.failures++;
       this.options.onError?.(error, this.failures, now - this.failingSince);
     } finally {
@@ -154,7 +198,10 @@ export class LogPoller {
     const base = this.options.intervalMs ?? DEFAULT_INTERVAL_MS;
     if (this.failures === 0) return base;
     const max = this.options.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
-    return Math.min(base * 2 ** this.failures, max);
+    const backoff = Math.min(base * 2 ** this.failures, max);
+    // A refusal outranks the ordinary ceiling: asking again sooner is what
+    // keeps the refusal going.
+    return this.refused ? Math.max(backoff, REFUSED_MIN_DELAY_MS) : backoff;
   }
 }
 
@@ -175,7 +222,7 @@ export function makeLogFetcher(
       credentials: 'include',
       headers: { accept: 'application/json' },
     });
-    if (!response.ok) throw new Error(`log request failed: ${response.status}`);
+    if (!response.ok) throw new LogRequestError(response.status);
     const { fromLogResponse } = await import('./feed');
     return fromLogResponse(await response.json());
   };

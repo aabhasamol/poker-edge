@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { gameIdFromUrl, LogPoller, makeLogFetcher, PollerUpdate } from '../poller';
+import { gameIdFromUrl, LogPoller, LogRequestError, makeLogFetcher, PollerUpdate } from '../poller';
 import { LogLine } from '../types';
 import { CHRONOLOGICAL } from './fixtures/handWithRaise';
 
@@ -25,6 +25,86 @@ function fakeTimers() {
     },
   };
 }
+
+describe('how hard the table is asked for data', () => {
+  /** Records the delay requested for every scheduled poll. */
+  function delayRecorder() {
+    const delays: number[] = [];
+    const queue: (() => void)[] = [];
+    return {
+      delays,
+      setTimer: (fn: () => void, ms: number) => {
+        delays.push(ms);
+        queue.push(fn);
+        return queue.length;
+      },
+      clearTimer: () => {
+        queue.length = 0;
+      },
+      async advance(): Promise<void> {
+        const next = queue.shift();
+        if (next) next();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      },
+    };
+  }
+
+  it('polls a few seconds apart, not once a second', async () => {
+    // A request every second is 60 a minute against someone else's server,
+    // which is what got the reader refused with a 403.
+    const timers = delayRecorder();
+    const poller = new LogPoller({
+      fetchLines: async () => [],
+      onUpdate: () => {},
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+    });
+
+    poller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    poller.stop();
+
+    expect(timers.delays[0]).toBeGreaterThanOrEqual(3_000);
+  });
+
+  it('backs off hard when the server refuses outright', async () => {
+    // 403 and 429 are the table saying stop, not try again shortly. Retrying
+    // on the usual schedule is what turns a rate limit into a lockout.
+    const timers = delayRecorder();
+    const poller = new LogPoller({
+      fetchLines: async () => {
+        throw new LogRequestError(403);
+      },
+      onUpdate: () => {},
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+    });
+
+    poller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    poller.stop();
+
+    expect(timers.delays[0]).toBeGreaterThanOrEqual(15_000);
+  });
+
+  it('treats an ordinary failure as an ordinary failure', async () => {
+    const timers = delayRecorder();
+    const poller = new LogPoller({
+      fetchLines: async () => {
+        throw new Error('network down');
+      },
+      onUpdate: () => {},
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+    });
+
+    poller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    poller.stop();
+
+    expect(timers.delays[0]).toBeLessThan(15_000);
+  });
+});
 
 describe('how long a failure has been going on', () => {
   /*
