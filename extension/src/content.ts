@@ -24,6 +24,17 @@ import { ExtensionMessage, HandMessage, STORAGE_KEY, StatusMessage } from './mes
 /** How often to re-check the URL, for SPA routing that fires no event. */
 const URL_WATCH_MS = 1_000;
 
+/**
+ * How long reads must fail continuously before the panel is told.
+ *
+ * Failures are routine: a reload, a dropped request, a rate limit, a hand
+ * ending. Reporting the third one put "the reader stopped getting data" over a
+ * live table about seven seconds in, while the next poll was often about to
+ * succeed. Half a minute of silence is a real outage; anything shorter is
+ * noise, and the panel keeps showing the last hand meanwhile.
+ */
+const OUTAGE_GRACE_MS = 30_000;
+
 declare global {
   interface Window {
     /** The reader currently attached to this page, if any. */
@@ -165,20 +176,28 @@ function start(id: string): void {
       };
       publish(latest);
     },
-    onError: (error, failures) => {
+    onRecover: () => {
+      // Reads are working again. Put the table back on screen immediately
+      // rather than waiting for the next line to arrive, which on a quiet
+      // table can be a whole hand away.
+      publish(latest ?? currentStatus());
+    },
+    onError: (error, failures, failingForMs) => {
       // An extension reload severs this script from its extension; there is
       // nothing to report to and nothing to be gained by carrying on.
       if (!extensionAlive()) {
         shutdown();
         return;
       }
-      // One failed poll is normal (a reload, a blip); a run of them is not.
-      if (failures < 3) return;
+      // Short outages are normal and usually over before anyone could react.
+      if (failingForMs < OUTAGE_GRACE_MS) return;
       publish({
         type: 'status',
         gameId: id,
         state: 'error',
-        detail: `${failures} consecutive failed reads: ${describe(error)}`,
+        detail:
+          `no data for ${Math.round(failingForMs / 1000)}s ` +
+          `(${failures} failed reads): ${describe(error)}`,
       });
     },
   });

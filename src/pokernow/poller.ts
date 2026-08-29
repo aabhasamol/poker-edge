@@ -19,8 +19,21 @@ export interface PollerOptions extends SessionOptions {
   readonly fetchLines: (cursor: string | null) => Promise<readonly LogLine[]>;
   /** Called after every poll that changed the hand. */
   readonly onUpdate: (update: PollerUpdate) => void;
-  /** Called when a poll throws, e.g. the tab went offline. */
-  readonly onError?: (error: unknown, consecutiveFailures: number) => void;
+  /**
+   * Called when a poll throws, e.g. the tab went offline.
+   *
+   * `failingForMs` is how long reads have been failing without a success. A
+   * single failed read means nothing — a reload, a blip, a rate limit — so the
+   * caller needs the duration to decide when an outage is real, rather than
+   * counting attempts whose spacing changes with the backoff.
+   */
+  readonly onError?: (error: unknown, consecutiveFailures: number, failingForMs: number) => void;
+  /**
+   * Called on the first poll that succeeds after any failure, including a poll
+   * that brings no new lines. Without it a quiet table leaves whatever the
+   * caller showed for the outage on screen after reads have recovered.
+   */
+  readonly onRecover?: () => void;
   /** Base gap between polls, in ms. */
   readonly intervalMs?: number;
   /** Ceiling for the backoff applied after consecutive failures, in ms. */
@@ -28,6 +41,8 @@ export interface PollerOptions extends SessionOptions {
   /** Injectable timer, for tests. */
   readonly setTimer?: (fn: () => void, ms: number) => unknown;
   readonly clearTimer?: (handle: unknown) => void;
+  /** Injectable clock, so failure duration can be tested without waiting. */
+  readonly now?: () => number;
 }
 
 export interface PollerUpdate {
@@ -39,7 +54,13 @@ export interface PollerUpdate {
 }
 
 const DEFAULT_INTERVAL_MS = 1_000;
-const DEFAULT_MAX_BACKOFF_MS = 30_000;
+/*
+ * Backoff ceiling. Kept low on purpose: a table that comes back has to be
+ * noticed quickly, and at a 30-second ceiling the reader could sit idle for
+ * half a minute after the outage had already ended. Ten seconds still stops
+ * the hammering that made a failing endpoint worse.
+ */
+const DEFAULT_MAX_BACKOFF_MS = 10_000;
 
 export class LogPoller {
   private readonly session: LogSession;
@@ -49,6 +70,8 @@ export class LogPoller {
   /** Guards against overlapping polls when one request runs long. */
   private inFlight = false;
   private failures = 0;
+  /** When the current run of failures began; null while reads are working. */
+  private failingSince: number | null = null;
 
   constructor(options: PollerOptions) {
     this.options = options;
@@ -98,7 +121,12 @@ export class LogPoller {
     this.inFlight = true;
     try {
       const lines = await this.options.fetchLines(this.session.cursor);
+      const wasFailing = this.failures > 0;
       this.failures = 0;
+      this.failingSince = null;
+      // Announced before the update, so a caller showing an outage clears it
+      // even on a poll that brings nothing new.
+      if (wasFailing) this.options.onRecover?.();
       const update = this.session.ingest(lines);
       if (update.applied > 0) {
         this.options.onUpdate({
@@ -109,8 +137,10 @@ export class LogPoller {
         });
       }
     } catch (error) {
+      const now = (this.options.now ?? Date.now)();
+      if (this.failingSince === null) this.failingSince = now;
       this.failures++;
-      this.options.onError?.(error, this.failures);
+      this.options.onError?.(error, this.failures, now - this.failingSince);
     } finally {
       this.inFlight = false;
     }

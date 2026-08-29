@@ -26,6 +26,77 @@ function fakeTimers() {
   };
 }
 
+describe('how long a failure has been going on', () => {
+  /*
+   * A read can fail for a second without the table being gone: a reload, a
+   * blip, a rate limit. Declaring "the reader stopped getting data" after two
+   * of those puts a red banner over a live hand that is still being played,
+   * so the caller needs to know how long the failure has lasted, not just how
+   * many attempts it has taken.
+   */
+  function failingPoller(clock: { value: number }) {
+    const timers = fakeTimers();
+    const errors: { failures: number; failingForMs: number }[] = [];
+    let recovered = 0;
+    let fail = true;
+
+    const poller = new LogPoller({
+      heroName: 'Alice',
+      fetchLines: async () => {
+        if (fail) throw new Error('log request failed: 403');
+        return [];
+      },
+      onUpdate: () => {},
+      onError: (_error, failures, failingForMs) => errors.push({ failures, failingForMs }),
+      onRecover: () => {
+        recovered += 1;
+      },
+      now: () => clock.value,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+    });
+
+    return { poller, timers, errors, stopFailing: () => (fail = false), recovered: () => recovered };
+  }
+
+  it('reports how long reads have been failing, not just how often', async () => {
+    const clock = { value: 0 };
+    const { poller, timers, errors } = failingPoller(clock);
+
+    poller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    clock.value += 5_000;
+    await timers.advance();
+    clock.value += 5_000;
+    await timers.advance();
+    poller.stop();
+
+    expect(errors[0]).toMatchObject({ failures: 1, failingForMs: 0 });
+    expect(errors[1]).toMatchObject({ failures: 2, failingForMs: 5_000 });
+    expect(errors[2]).toMatchObject({ failures: 3, failingForMs: 10_000 });
+  });
+
+  it('tells the caller when reads start working again', async () => {
+    // Recovery has to be announced even when the poll brings no new lines:
+    // a quiet table would otherwise leave the error banner up forever.
+    const clock = { value: 0 };
+    const { poller, timers, stopFailing, recovered } = failingPoller(clock);
+
+    poller.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    clock.value += 5_000;
+    await timers.advance();
+    expect(recovered()).toBe(0);
+
+    stopFailing();
+    clock.value += 5_000;
+    await timers.advance();
+    poller.stop();
+
+    expect(recovered()).toBe(1);
+  });
+});
+
 describe('incremental polling', () => {
   it('feeds only new lines and reports each update', async () => {
     const timers = fakeTimers();
