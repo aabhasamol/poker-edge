@@ -11,12 +11,3 @@ coverage
 logs/
 *.pokernow.csv
 *.pokernow.json
-
-# Study material kept beside the code but not part of it: lecture notes and
-# other third-party teaching material that is not ours to republish.
-# Every spelling is listed because git ignore patterns are case-sensitive.
-learning material/
-learning-material/
-Learning Material/
-Learning-Material/
-learning_material/
