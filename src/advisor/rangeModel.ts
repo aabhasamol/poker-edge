@@ -226,17 +226,64 @@ function applyPostflopActions(
     const checked = streetActions.every((a) => a.action === 'check');
 
     if (aggressive) {
-      current = current.reweight((index, weight) => weight * betWeight(strength.get(index) ?? 0.5, tendencies));
-      reasoning.push(`Bet or raised the ${street}: weighted toward strong hands, with bluffs kept in.`);
+      /*
+       * How big the bet was, in pots. This is the signal's intensity, and it
+       * decides how much the range narrows — a shove and a probe are different
+       * statements about a hand, and treating them alike is what made the
+       * advisor confident in spots where it was drawing dead.
+       */
+      const sizeRatio = aggressiveSizeRatio(streetActions);
+      current = current.reweight(
+        (index, weight) => weight * betWeight(strength.get(index) ?? 0.5, tendencies, sizeRatio),
+      );
+      reasoning.push(
+        `Bet or raised the ${street} for about ${(sizeRatio * 100).toFixed(0)}% of the pot: ` +
+          `weighted toward hands that want a call at that price, with the bluffs that keep it honest.`,
+      );
     } else if (called) {
-      current = current.reweight((index, weight) => weight * callWeight(strength.get(index) ?? 0.5, tendencies));
-      reasoning.push(`Called on the ${street}: weighted toward hands worth continuing with.`);
+      const priceRatio = callPriceRatio(streetActions);
+      current = current.reweight(
+        (index, weight) => weight * callWeight(strength.get(index) ?? 0.5, tendencies, priceRatio),
+      );
+      reasoning.push(
+        `Called ${(priceRatio * 100).toFixed(0)}% of the pot on the ${street}: ` +
+          'weighted toward hands worth continuing at that price.',
+      );
     } else if (checked) {
       current = current.reweight((index, weight) => weight * checkWeight(strength.get(index) ?? 0.5));
       reasoning.push(`Checked the ${street}: weighted away from the strongest hands.`);
     }
   }
   return current;
+}
+
+/**
+ * The biggest bet or raise on this street, as a share of the pot it was made
+ * into. Falls back to a pot-sized read when the log gave no usable pot, which
+ * keeps a missing number from quietly meaning "tiny bet" and widening a range
+ * that should have narrowed.
+ */
+function aggressiveSizeRatio(actions: readonly ActionRecord[]): number {
+  const bets = actions.filter((action) => action.action === 'bet' || action.action === 'raise');
+  let largest = 0;
+  for (const bet of bets) {
+    const pot = bet.potBefore > 0 ? bet.potBefore : 0;
+    if (pot <= 0) return 1;
+    largest = Math.max(largest, bet.added / pot);
+  }
+  return largest > 0 ? largest : 0.5;
+}
+
+/** What a call on this street cost, as a share of the pot faced. */
+function callPriceRatio(actions: readonly ActionRecord[]): number {
+  const calls = actions.filter((action) => action.action === 'call');
+  let largest = 0;
+  for (const call of calls) {
+    const pot = call.potBefore > 0 ? call.potBefore : 0;
+    if (pot <= 0) continue;
+    largest = Math.max(largest, call.toCallBefore / pot);
+  }
+  return largest;
 }
 
 function boardForStreet(board: readonly Card[], street: 'flop' | 'turn' | 'river'): Card[] {
@@ -282,15 +329,59 @@ function strengthPercentiles(
  * thing, and it does not: against someone whose bets keep arriving with one
  * pair, reading every raise as near-nut strength folds winners.
  */
-function betWeight(percentile: number, tendencies: Tendencies): number {
-  const midpoint = clamp(0.28 + 0.72 * tendencies.showdownStrength, 0.3, 0.78);
+/*
+ * Bet size is a signal, and its intensity is chosen by the sender.
+ *
+ * Spence's result, as Sen's notes put it: "a signal of lower intensity will be
+ * mimicked but one of a higher intensity will not be mimicked" — separation
+ * happens only when the weak type finds the signal too expensive to copy. A
+ * quarter-pot probe is cheap and gets mimicked by everything; a pot-sized shove
+ * is not, so the hands still making it concentrate at the two ends.
+ *
+ * This function is the likelihood P(bet of this size | this holding) that
+ * belief consistency requires — posterior ∝ prior × likelihood. It previously
+ * ignored size entirely, which is why a 2700-chip shove and a 60-chip bet
+ * narrowed a range identically, and why the bottom flush on a three-flush
+ * board was scored at 91% equity in a hand that was drawing dead.
+ */
+function betWeight(percentile: number, tendencies: Tendencies, sizeRatio: number): number {
+  const size = clamp(sizeRatio, 0, 2.5);
+
+  /*
+   * Value: the bigger the bet, the stronger a hand has to be to want a call.
+   * The midpoint is where the range's own strength distribution gets cut, so
+   * moving it up with size is exactly the separating pressure above.
+   */
+  const midpoint = clamp(0.28 + 0.72 * tendencies.showdownStrength + 0.3 * size, 0.3, 0.94);
   const value = logistic(percentile, midpoint, 0.14);
-  return Math.max(tendencies.bluffFrequency * (1 - percentile), value);
+
+  /*
+   * Bluffs: the share that keeps a caller indifferent, which is where the
+   * mixed-equilibrium condition lands for a bet of s pots — s / (1 + 2s).
+   * Without this term a big bet would read as pure value, hero would fold every
+   * marginal hand, and bluffing into hero would be free. The bluffs sit at the
+   * bottom of the range, not the middle: a hand with some showdown value has no
+   * reason to turn itself into one.
+   */
+  const bluffShare = size / (1 + 2 * size);
+  const bluff = 2 * tendencies.bluffFrequency * bluffShare * (1 - percentile) ** 2;
+
+  return Math.max(bluff, value);
 }
 
-/** Calling is the middle of the range: too weak to raise, too strong to fold. */
-function callWeight(percentile: number, tendencies: Tendencies): number {
-  const continues = logistic(percentile, 0.4 - tendencies.stickiness * 0.25, 0.14);
+/**
+ * Calling is the middle of the range: too weak to raise, too strong to fold.
+ *
+ * The price paid matters for the same reason the size of a bet does. Calling a
+ * quarter-pot bet needs almost nothing; calling a pot-sized one needs a real
+ * hand, so the hands that can still be there after it are stronger.
+ */
+function callWeight(percentile: number, tendencies: Tendencies, priceRatio: number): number {
+  const price = clamp(priceRatio, 0, 2.5);
+  // Same coefficient as a bet of the same size: paying a price and asking one
+  // are the same signal seen from the two sides, and giving calls a gentler
+  // slope was an arbitrary asymmetry, not a modelled one.
+  const continues = logistic(percentile, 0.4 - tendencies.stickiness * 0.25 + 0.3 * price, 0.14);
   const wouldRaise = logistic(percentile, 0.9, 0.05);
   return continues * (1 - 0.6 * wouldRaise);
 }
