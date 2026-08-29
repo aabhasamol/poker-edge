@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Advice } from '../../src/advisor/advisor';
+import { Calibration } from '../../src/advisor/calibration';
 import { GameState } from '../../src/engine/gameState';
 import { PROFILES, TIGHT } from '../../src/advisor/strategy';
 import { amountToCall, LiveHand } from '../../src/pokernow/handState';
@@ -19,6 +20,7 @@ export function useAdvice(
   state: GameState | null,
   profile: string,
   tendenciesByPlayer: Record<string, unknown>,
+  calibration: Calibration,
 ): { advice: Advice | null; thinking: boolean; error: string | null } {
   const [advice, setAdvice] = useState<Advice | null>(null);
   const [thinking, setThinking] = useState(false);
@@ -59,8 +61,10 @@ export function useAdvice(
       // Re-run when a tag changes: the read is part of the question.
       JSON.stringify(Object.keys(tendenciesByPlayer).sort()),
       profileFingerprint(tendenciesByPlayer),
+      // A refitted correction is a different question, not the same one.
+      calibration.samples,
     ].join('/');
-  }, [hand, heroId, state, profile, tendenciesByPlayer]);
+  }, [hand, heroId, state, profile, tendenciesByPlayer, calibration]);
 
   useEffect(() => {
     const worker = workerRef.current;
@@ -77,6 +81,7 @@ export function useAdvice(
       state,
       options: { samples: 12_000, strategy: PROFILES[profile] ?? TIGHT },
       tendenciesByPlayer: tendenciesByPlayer as AdviceRequest['tendenciesByPlayer'],
+      calibration,
     };
     worker.postMessage(request);
     // Intentionally keyed on `key`, not on `hand`: identical situations must

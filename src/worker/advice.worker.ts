@@ -10,6 +10,7 @@
 
 import { Advice, advise, AdviceOptions } from '../advisor/advisor';
 import { Tendencies } from '../advisor/tendencies';
+import { Calibration } from '../advisor/calibration';
 import { GameState } from '../engine/gameState';
 import { POOL_DEFAULTS } from '../advisor/tendencies';
 import { LiveHand } from '../pokernow/handState';
@@ -25,6 +26,11 @@ export interface AdviceRequest {
    * lookup function cannot cross the worker boundary.
    */
   readonly tendenciesByPlayer?: Record<string, Tendencies>;
+  /**
+   * Correction fitted to past outcomes. Plain data, so it crosses the worker
+   * boundary intact — the panel owns the record and the worker only applies it.
+   */
+  readonly calibration?: Calibration;
 }
 
 export interface AdviceResponse {
@@ -34,12 +40,13 @@ export interface AdviceResponse {
 }
 
 self.onmessage = (event: MessageEvent<AdviceRequest>) => {
-  const { id, hand, heroId, state, options, tendenciesByPlayer } = event.data;
+  const { id, hand, heroId, state, options, tendenciesByPlayer, calibration } = event.data;
   let response: AdviceResponse;
   try {
     const profiled = tendenciesByPlayer ?? {};
     const withProfiles: AdviceOptions = {
       ...(options ?? {}),
+      ...(calibration ? { calibration } : {}),
       ...(Object.keys(profiled).length > 0
         ? { tendenciesFor: (playerId: string) => profiled[playerId] ?? POOL_DEFAULTS }
         : {}),

@@ -18,6 +18,7 @@ import { ErrorBoundary } from './ErrorBoundary';
 import { ExtensionMessage, STORAGE_KEY, StatusMessage } from './messages';
 import { useAdvice } from './useAdvice';
 import { useAnalysis } from '../../src/ui/useAnalysis';
+import { useOutcomes } from './useOutcomes';
 import { useProfiles } from './useProfiles';
 
 const STRATEGY_KEYS = ['loose', 'standard', 'tight'] as const;
@@ -77,13 +78,21 @@ function Panel() {
     () => (hand ? toGameState(hand, heroId) : { state: null, reason: 'Waiting for the table.' }),
     [hand, heroId],
   );
+  // What past advice was actually worth, fed back into the next answer.
+  const outcomes = useOutcomes(completed, heroId);
   const { advice, thinking, error } = useAdvice(
     hand,
     heroId,
     bridged.state,
     strategy,
     profiles.tendenciesByPlayer,
+    outcomes.calibration,
   );
+
+  // Every recommendation shown is noted, so the hand's result can settle it.
+  useEffect(() => {
+    if (hand && advice) outcomes.noteAdvice(hand, advice);
+  }, [hand, advice, outcomes]);
 
   // Threat analysis — what beats hero now, what draws out — comes from the
   // engine, in its own worker so it never delays the recommendation.

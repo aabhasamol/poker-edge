@@ -35,6 +35,7 @@ import {
   trapThresholdFor,
 } from './strategy';
 import { POOL_DEFAULTS, Tendencies } from './tendencies';
+import { calibrate, Calibration, CalibratedEquity, NO_CALIBRATION } from './calibration';
 
 export type AdviceAction = 'fold' | 'check' | 'call' | 'raise';
 
@@ -84,6 +85,11 @@ export interface Advice {
   readonly drawOutRisk: number | null;
   /** Everything the reader should distrust about this advice. */
   readonly caveats: readonly string[];
+  /**
+   * What the outcome record did to the equity above. Zero adjustment with zero
+   * samples means nothing has been learned about prices like this one yet.
+   */
+  readonly calibration: CalibratedEquity;
 }
 
 /**
@@ -129,6 +135,11 @@ export interface AdviceOptions {
   readonly seed?: number;
   /** How tight to play and how much to disguise. Defaults to tight. */
   readonly strategy?: StrategyProfile;
+  /**
+   * Correction learned from how past predictions turned out. Defaults to no
+   * correction, so a fresh install behaves exactly as before.
+   */
+  readonly calibration?: Calibration;
 }
 
 /**
@@ -204,6 +215,23 @@ export function advise(
     { samples: Math.min(samples, 10_000), seed },
   ).equity;
 
+  /*
+   * Correct the estimate by what predictions at this price have actually been
+   * worth. The model reweights ranges on whether an opponent bet and never on
+   * how much, so its errors concentrate where the bets are biggest; the record
+   * measures that where it happens instead of assuming a constant.
+   */
+  const price = toCall > 0 ? toCall / (pot + toCall) : 0;
+  const calibrated = calibrate(options.calibration ?? NO_CALIBRATION, equity.equity, price);
+  const heroEquity = calibrated.equity;
+  if (calibrated.adjustment !== 0) {
+    caveats.push(
+      `Equity moved ${calibrated.adjustment > 0 ? '+' : ''}${(calibrated.adjustment * 100).toFixed(1)} points ` +
+        `by what ${calibrated.samples} past showdowns at this price were actually worth; ` +
+        `the raw model said ${(equity.equity * 100).toFixed(1)}%.`,
+    );
+  }
+
   if (equity.impossible) {
     caveats.push('The modelled range is empty — the read contradicts the visible cards.');
   }
@@ -248,26 +276,26 @@ export function advise(
       basis: 'Giving up costs nothing more.',
     });
   } else {
-    const ev = equity.equity * pot;
+    const ev = heroEquity * pot;
     choices.push({
       action: 'check',
       amount: 0,
       raiseTo: null,
       ev,
-      basis: `Free card, keeping ${(equity.equity * 100).toFixed(1)}% of the ${pot} already in the middle.`,
+      basis: `Free card, keeping ${(heroEquity * 100).toFixed(1)}% of the ${pot} already in the middle.`,
     });
   }
 
   // --- Call ---
   if (toCall > 0) {
     const call = Math.min(toCall, heroStack);
-    const ev = equity.equity * (pot + call) - call;
+    const ev = heroEquity * (pot + call) - call;
     choices.push({
       action: 'call',
       amount: call,
       raiseTo: null,
       ev,
-      basis: `${(equity.equity * 100).toFixed(1)}% of a ${pot + call} pot, less the ${call} it costs.`,
+      basis: `${(heroEquity * 100).toFixed(1)}% of a ${pot + call} pot, less the ${call} it costs.`,
     });
   }
 
@@ -316,6 +344,7 @@ export function advise(
         stack: entry.player.stack,
       })),
       option.amount >= heroStack,
+      options.calibration ?? NO_CALIBRATION,
     );
     choices.push({
       action: 'raise',
@@ -370,7 +399,7 @@ export function advise(
 
   // Trapping: strong enough to raise, but flat-call sometimes so the raising
   // range is not purely the strong hands.
-  const strongEnoughToTrap = equity.equity >= trapThresholdFor(strategy, ranges.length);
+  const strongEnoughToTrap = heroEquity >= trapThresholdFor(strategy, ranges.length);
   const raiseIsBest = candidates.some((entry) => entry.option.action === 'raise');
   const flatCall = cleared.find((option) => option.action === 'call');
   if (strongEnoughToTrap && raiseIsBest && flatCall && strategy.trapFrequency > 0) {
@@ -425,6 +454,7 @@ export function advise(
     requiredEquity: toCall > 0 ? toCall / (pot + toCall) : null,
     opponents,
     caveats,
+    calibration: calibrated,
   };
 }
 
@@ -528,6 +558,8 @@ function evaluateRaise(
   seats: readonly { committedStreet: number; stack: number }[],
   /** True when hero's raise is all-in, so nothing can be bet after it. */
   noFurtherBetting: boolean,
+  /** Correction learned from outcomes, applied at the price this raise makes. */
+  calibration: Calibration,
 ): RaiseEvaluation {
   if (ranges.length === 0) {
     return { ev: pot, foldProbability: 1, equityWhenCalled: 1, reRaiseProbability: 0, realization: 1 };
@@ -583,8 +615,18 @@ function evaluateRaise(
     : null;
   const rawEquity = contested?.impossible === false ? contested.equity : 0;
 
-  const realization = equityRealization(rawEquity, inPosition, ranges.length);
-  const equityWhenCalled = rawEquity * realization;
+  /*
+   * The contested branch is where a raise's value is decided, and it is priced
+   * off the same range model that has been measured to overstate hero when the
+   * money is big. Correct it at the price this raise itself creates, before
+   * realization scales it — otherwise the learning applies to calls and not to
+   * the shoves that cost the most.
+   */
+  const raisePrice = raise > 0 ? raise / (pot + raise) : 0;
+  const correctedEquity = calibrate(calibration, rawEquity, raisePrice).equity;
+
+  const realization = equityRealization(correctedEquity, inPosition, ranges.length);
+  const equityWhenCalled = correctedEquity * realization;
 
   // Somebody re-raising is a third outcome, and for a weak hand the expensive
   // one. Its probability is the strong tail of whoever is still in.
