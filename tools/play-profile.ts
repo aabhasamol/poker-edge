@@ -2,7 +2,12 @@
  * Profile how hero actually played a session, and compare it with what the
  * advisor would have said at the same decisions.
  *
- *   npm run profile -- <log.csv> [--hero "Your Name"]
+ *   npm run profile -- <log.csv> [--hero "Your Name"] [--table]
+ *
+ * `--table` profiles every seat instead of the advisor comparison. Hero's
+ * numbers mean little on their own — 55% VPIP is loose at a full table and
+ * tight heads-up — so the row that matters is the same measure for the people
+ * hero was playing against, in the same games, over the same hands.
  *
  * Two questions, kept apart because they are answered with different
  * confidence:
@@ -39,6 +44,7 @@ if (!path) {
   console.error('Usage: npm run profile -- <log.csv> [--hero "Your Name"]');
   process.exit(1);
 }
+const wantTable = args.includes('--table');
 const heroFlag = args.indexOf('--hero');
 const heroNameArg = heroFlag >= 0 ? (args[heroFlag + 1] ?? '') : '';
 
@@ -139,23 +145,33 @@ if (lines.length === 0) {
   process.exit(1);
 }
 
-const profiled: ProfiledHand[] = [];
+/** Every seat that appeared, so hero can be read against the table. */
+const seats = new Map<string, { name: string; hands: ProfiledHand[] }>();
 const decisions: { decision: Decision; heroId: string }[] = [];
+let heroId: string | null = null;
 
 for (const messages of handsFrom(lines)) {
-  // A first pass identifies hero, a second captures decisions against that id.
+  // A first pass names the seats, a second captures each player's decisions
+  // against their own id — the snapshot before an action is per-player.
   const scout = new HandTracker();
   for (const message of messages) scout.apply(parseLogMessage(message));
+  const preview = scout.snapshot();
 
-  const heroId = findHeroId(scout.snapshot(), heroNameArg);
-  if (heroId === null) continue;
+  heroId = findHeroId(preview, heroNameArg) ?? heroId;
 
-  const replayed = replayHand(messages, heroId);
-  profiled.push({ hand: replayed.hand, decisions: replayed.decisions });
-  for (const decision of replayed.decisions) decisions.push({ decision, heroId });
+  for (const player of preview.players) {
+    const replayed = replayHand(messages, player.id);
+    const seat = seats.get(player.id) ?? { name: player.name, hands: [] };
+    seat.hands.push({ hand: replayed.hand, decisions: replayed.decisions });
+    seats.set(player.id, seat);
+
+    if (player.id === heroId) {
+      for (const decision of replayed.decisions) decisions.push({ decision, heroId: player.id });
+    }
+  }
 }
 
-const heroId = profiled.length > 0 ? findHeroId(profiled[0]!.hand, heroNameArg) : null;
+const profiled = seats.get(heroId ?? '')?.hands ?? [];
 const profile = profileSession(profiled, heroId ?? '');
 
 const compared = {
@@ -215,6 +231,41 @@ function mean(values: readonly number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+/**
+ * One row per seat, sorted by chips won.
+ *
+ * Net over one session is mostly variance, so it is placed last and read as
+ * context rather than as a ranking: the style columns are what a session this
+ * short can actually say something about.
+ */
+function reportTable(): void {
+  const rows = [...seats.entries()]
+    .map(([id, seat]) => ({ id, name: seat.name, profile: profileSession(seat.hands, id) }))
+    .filter((row) => row.profile.hands > 0)
+    .sort((a, b) => b.profile.net - a.profile.net);
+
+  console.log(`\n=== Every seat at the table  (${path!.split('/').pop()}) ===\n`);
+  console.log('player            hands   VPIP    PFR  3bet   agg  fold/bet   WTSD   W@SD      net');
+  for (const row of rows) {
+    const p = row.profile;
+    const mark = row.id === heroId ? '*' : ' ';
+    console.log(
+      `${mark}${row.name.slice(0, 16).padEnd(17)}` +
+        `${String(p.hands).padStart(4)}  ` +
+        `${pct(p.vpip)} ${pct(p.pfr)} ${pct(p.threeBet)} ` +
+        `${(p.aggression === null ? '  n/a' : p.aggression.toFixed(2)).padStart(5)} ` +
+        `${pct(p.foldedFacingBet)}    ` +
+        `${pct(p.showedDown)} ${pct(p.wonWhenShown)} ` +
+        `${(p.net >= 0 ? '+' : '') + p.net}`.padStart(9),
+    );
+  }
+  console.log('\n* = hero.  3bet is out of the times a raise was there to face;');
+  console.log('fold/bet is out of post-flop spots facing a bet; W@SD is out of');
+  console.log('showdowns the log revealed cards at, so it under-counts pots won');
+  console.log('unshown. Net over one session is mostly variance — read the style');
+  console.log('columns, not the money column.');
+}
+
 function report(profile: PlayProfile): void {
   const bb = profile.bigBlind || 1;
   console.log(`\n=== How hero played  (${path!.split('/').pop()}) ===\n`);
@@ -236,6 +287,11 @@ function report(profile: PlayProfile): void {
     `net:                      ${profile.net >= 0 ? '+' : ''}${profile.net} chips  ` +
       `(${(profile.net / bb).toFixed(1)} bb, ${((profile.net / bb / Math.max(1, profile.hands)) * 100).toFixed(1)} bb/100)`,
   );
+}
+
+if (wantTable) {
+  reportTable();
+  process.exit(0);
 }
 
 report(profile);

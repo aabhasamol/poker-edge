@@ -37,12 +37,13 @@ export interface Rate {
 export interface PlayProfile {
   readonly hands: number;
   /**
-   * Hands the log stated hole cards for.
+   * Hands this player was seated in — the denominator every rate below uses.
    *
-   * Only the viewer's own cards are ever stated, so this counts hands the
-   * viewer was dealt into — profiling anybody else leaves it at zero and the
-   * rates built on it meaningless. That is the intended limit: a log shows one
-   * player's hand, so only one player can be profiled from it.
+   * Deliberately not "hands the log stated hole cards for". Only the viewer's
+   * own cards are ever stated, and gating on them silently dropped every hand
+   * the viewer sat out, which made an opponent's rates a fraction of somebody
+   * else's deals. Everything except the cards is visible for every seat, so
+   * every seat can be profiled and compared.
    */
   readonly dealt: number;
   /** Average seats occupied, which decides what a loose VPIP even means. */
@@ -118,7 +119,6 @@ export function profileSession(hands: readonly ProfiledHand[], playerId: string)
     net += netFor(hand, playerId);
 
     const player = hand.players.find((seat) => seat.id === playerId)!;
-    if (!hand.heroHole) continue;
     dealt += 1;
 
     const preflop = decisions.filter((decision) => decision.street === 'preflop');

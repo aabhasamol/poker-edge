@@ -193,21 +193,48 @@ describe('chips, counted the way the table counted them', () => {
     expect(Number.isFinite(empty.net)).toBe(true);
   });
 
-  it('counts an opponent as dealt in, which is why only the viewer is profilable', () => {
+  it('profiles an opponent, whose cards the log never states', () => {
     /*
-     * A limitation worth pinning rather than papering over. `Your hand is …`
-     * states the viewer's cards and nobody else's, and the log carries no
-     * marker of whose they are — so asked about an opponent this function
-     * counts the viewer's deals against that opponent's actions, and every
-     * rate built on it is nonsense. The caller resolves the viewer's id
-     * before calling; this test is here so that contract is not quietly lost.
+     * Everything except the hole cards is visible for every seat: who put
+     * chips in, who raised, who folded to a bet, who won. Gating the
+     * denominator on `Your hand is …` restricted all of it to the one player
+     * whose cards happen to be stated — a limit of the log, not of the
+     * measures. It is the comparison against the rest of the table that says
+     * whether a way of playing is any good.
      */
-    const other = profileSession(session, 'cal');
-    expect(other.hands).toBe(3);
-    expect(other.dealt).toBe(3);
-    // Cal called pre-flop twice, which is real — but the denominator is the
-    // viewer's deals, so the rate below describes nobody.
-    expect(other.vpip).toEqual({ count: 2, of: 3 });
+    const cal = profileSession(session, 'cal');
+    expect(cal.hands).toBe(3);
+    // Cal completes the blind in the limped hand and calls the 3-bet; in the
+    // hand where Cal is the big blind and checks, no chips went in by choice.
+    expect(cal.vpip).toEqual({ count: 2, of: 3 });
+    // Cal 3-bets to 180 in the third hand.
+    expect(cal.pfr).toEqual({ count: 1, of: 3 });
+  });
+
+  it('counts a hand the log stated no hole cards for', () => {
+    /*
+     * The discriminating case. A hand the viewer sat out has no
+     * `Your hand is …` line at all, and while the denominator was gated on
+     * that line such a hand vanished from every rate — so an opponent's VPIP
+     * was computed over the viewer's deals rather than their own.
+     */
+    const satOut = replay(
+      [
+        START.replace("#1 (id: t1", "#4 (id: t4"),
+        STACKS,
+        '"Hero @ hero" posts a small blind of 10',
+        '"Cal @ cal" posts a big blind of 20',
+        '"Hero @ hero" folds',
+        '"Cal @ cal" collected 30 from pot',
+        '-- ending hand #4 --',
+      ],
+      'cal',
+    );
+    const cal = profileSession([...session, satOut], 'cal');
+    expect(cal.hands).toBe(4);
+    // The extra hand is a big blind that never acted: it lands in the
+    // denominator and nowhere else, which is exactly what a VPIP means.
+    expect(cal.vpip).toEqual({ count: 2, of: 4 });
   });
 });
 
