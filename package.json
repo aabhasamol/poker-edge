@@ -14,7 +14,8 @@
     "cli": "tsx src/engine/cli.ts",
     "replay": "tsx src/pokernow/replay.ts",
     "build:ext": "vite build -c vite.config.extension.ts && vite build -c vite.config.content.ts && cp extension/manifest.json extension/dist/manifest.json",
-    "accuracy": "tsx tools/range-accuracy.ts"
+    "accuracy": "tsx tools/range-accuracy.ts",
+    "profile": "tsx tools/play-profile.ts"
   },
   "dependencies": {
     "react": "^18.3.1",
