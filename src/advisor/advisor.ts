@@ -35,6 +35,7 @@ import {
   trapThresholdFor,
 } from './strategy';
 import { POOL_DEFAULTS, Tendencies } from './tendencies';
+import { MEASURED_MODEL_ERROR } from './accuracy';
 import { calibrate, Calibration, CalibratedEquity, NO_CALIBRATION } from './calibration';
 
 export type AdviceAction = 'fold' | 'check' | 'call' | 'raise';
@@ -244,9 +245,26 @@ export function advise(
     caveats.push(
       'Post-flop ranges come from a heuristic model of betting behaviour, not from solved play.',
     );
+    /*
+     * The number that decides whether this figure can be acted on. Measured
+     * against real showdowns rather than asserted, and stated in the same
+     * units as the equity so the two can be read against each other: an edge
+     * smaller than the error bar is not an edge.
+     */
+    caveats.push(
+      `Measured against showdowns, equities from this model have missed by about ` +
+        `${Math.round(MEASURED_MODEL_ERROR * 100)} points either way. Treat a figure ` +
+        'near 50% as no read at all.',
+    );
   }
   if (equity.stdError > 0.01) {
-    caveats.push(`Equity estimate is ±${(equity.stdError * 200).toFixed(1)} points at 95%.`);
+    // Named as simulation noise, not as the error on the estimate. It is the
+    // smaller of the two errors by an order of magnitude, and quoting it alone
+    // in the language of a confidence interval reads as the total.
+    caveats.push(
+      `Simulation noise alone is ±${(equity.stdError * 200).toFixed(1)} points at 95%; ` +
+        'the range model below is the larger error.',
+    );
   }
 
   // An assumption worth stating every time, because it bounds what the numbers
