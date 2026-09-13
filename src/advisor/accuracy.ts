@@ -29,6 +29,27 @@ import { Card, cardId } from '../engine/card';
 import { comboIndex } from '../range/combos';
 import { Range } from '../range/range';
 
+/**
+ * How far the quoted equity has been measured to miss, in probability points.
+ *
+ * Derived from 24 river showdowns across two exported sessions, scored on the
+ * river because no cards remain there: "equity against the modelled ranges" is
+ * then exactly the probability hero's hand is best, and the showdown says
+ * whether it was. Bucketed by what the panel said, the gaps were +35, −30,
+ * −28, −33 and +19 points. The aggregate was almost exact (38.2% quoted
+ * against 38.9% won), which is the trap: the errors are large and cancel, so
+ * an average taken over a session hides them completely.
+ *
+ * Deliberately a single blunt number rather than a fitted curve. With bucket
+ * counts of 7, 1, 5, 3 and 2, and with the buckets conditioned on hero having
+ * chosen to keep playing, anything shaped like a correction would be fitting
+ * noise. It is here to be reported, not to adjust anything.
+ *
+ * Re-measure with `npm run accuracy` and the calibration check before touching
+ * the range model; a change that cannot move this is a change of opinion.
+ */
+export const MEASURED_MODEL_ERROR = 0.3;
+
 export interface PredictionScore {
   /** Information over a uniform range, in bits. Negative is worse than none. */
   readonly bits: number;
