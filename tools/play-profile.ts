@@ -297,6 +297,24 @@ if (wantTable) {
 report(profile);
 
 console.log(`\n=== What the advisor would have said ===\n`);
+
+if (compared.rated === 0) {
+  /*
+   * A host's export carries no `Your hand is …` line, so hero's cards are
+   * unknown and the advisor has nothing to advise on. Saying so beats
+   * printing a table of n/a and an EV gap of 0.000, which reads as a finding
+   * — "the tool would have changed nothing" — rather than as no data.
+   */
+  console.log(
+    'Nothing to rate: this export states no hole cards for hero, so the\n' +
+      'advisor has no hand to advise on. That happens when the log was\n' +
+      'downloaded from a seat other than hero\'s — only the seated player\'s\n' +
+      'own session is served their cards. The play profile above is\n' +
+      'unaffected; it never needed them.',
+  );
+  process.exit(0);
+}
+
 console.log(`decisions it could rate:  ${compared.rated}   (declined ${compared.refused})`);
 console.log(`hero and tool agreed on:  ${share(compared.agreed, compared.rated)}`);
 for (const street of ['preflop', 'flop', 'turn', 'river'] as const) {
