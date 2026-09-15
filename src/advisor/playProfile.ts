@@ -3,9 +3,13 @@
  *
  * These are the standard measures — how often chips went in before the flop,
  * how aggressive the post-flop line was, how often the hand was shown down —
- * counted from the log rather than estimated. They exist to answer one
- * question the advisor cannot answer about itself: whether a session played
- * with the tool looks different from a session played without it.
+ * counted from the log rather than estimated. They describe how somebody
+ * played, which is the ground truth the advisor cannot supply about itself.
+ *
+ * The comparison they were built for — a session played with the advisor
+ * against one played without it — has never actually been run: every log seen
+ * so far was played with no panel open. Until one is, these numbers measure
+ * the player, not the tool.
  *
  * Every rate here is a fraction of a stated denominator, and the denominators
  * differ (hands dealt, chances that arose, spots faced). A rate quoted without

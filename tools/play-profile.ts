@@ -12,9 +12,11 @@
  * Two questions, kept apart because they are answered with different
  * confidence:
  *
- *  1. HOW HERO PLAYED — counts of things that happened. Comparing a session
- *     played with the tool against one played without it is the honest use of
- *     this half. The counting lives in `src/advisor/playProfile.ts`, under test.
+ *  1. HOW HERO PLAYED — counts of things that happened, which describe the
+ *     player whether or not the panel was ever open. Reading a difference
+ *     between two sessions as an effect of the tool requires knowing the tool
+ *     was actually running in one of them; the log does not record that, so
+ *     the caller has to. The counting lives in `src/advisor/playProfile.ts`.
  *
  *  2. WHAT THE ADVISOR WOULD HAVE SAID — the advisor re-run on the state as it
  *     stood at every decision hero faced. The agreement rate is a fact. The EV
