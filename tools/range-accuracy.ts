@@ -9,6 +9,13 @@
  * change that cannot beat the previous number is a change of opinion, not an
  * improvement.
  *
+ * Works on a log exported by the host as well as one exported from hero's own
+ * seat. A host export carries no `Your hand is …` line, so hero's cards are
+ * unknown and only the board is removed from the modelled ranges. That is
+ * weaker removal — two cards fewer — which makes the model marginally more
+ * generous to itself, so scores from the two kinds of export are not directly
+ * comparable and the header says which was used.
+ *
  * The log stays wherever you point this at. Nothing is copied into the repo —
  * exported logs carry other players' names and revealed hands.
  */
@@ -46,20 +53,23 @@ function handsFrom(messages: readonly { msg: string }[]): string[][] {
 
 const scores: (PredictionScore | null)[] = [];
 let ruledOut = 0;
+/** Whether any hand stated hero's cards, which decides how strong removal was. */
+let sawHeroCards = false;
 
 for (const messages of handsFrom(orderLogLines(parseLogCsv(readFileSync(path, 'utf8'))))) {
   const tracker = new HandTracker();
   for (const message of messages) tracker.apply(parseLogMessage(message));
   const hand = tracker.snapshot();
 
-  // Without hero's cards there is no card removal to model against, and
-  // without a board the post-flop model never runs.
-  if (!hand.heroHole || hand.board.length < 3) continue;
+  // Without a board the post-flop model never runs. Hero's cards are removed
+  // when the export has them and simply absent when it does not.
+  if (hand.board.length < 3) continue;
+  if (hand.heroHole) sawHeroCards = true;
   const hero = heroName
     ? hand.players.find((player) => player.name.toLowerCase() === heroName)
     : null;
 
-  const known = [...hand.heroHole, ...hand.board];
+  const known = [...(hand.heroHole ?? []), ...hand.board];
   for (const villain of hand.players) {
     if (hero && villain.id === hero.id) continue;
     if (!villain.shownCards) continue;
@@ -72,6 +82,11 @@ for (const messages of handsFrom(orderLogLines(parseLogCsv(readFileSync(path, 'u
 }
 
 const report = summariseAccuracy(scores, ruledOut);
+console.log(
+  sawHeroCards
+    ? "card removal:          hero's hole cards and the board"
+    : 'card removal:          board only (host export: no hole cards for hero)',
+);
 console.log(`showdowns scored:      ${report.scored}`);
 console.log(`ruled out or unusable: ${report.ruledOut}`);
 console.log(
