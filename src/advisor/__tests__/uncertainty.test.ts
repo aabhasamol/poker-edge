@@ -8,8 +8,12 @@
  * confidence interval, tells the reader the number is precise to a point or
  * two when it has been measured missing by thirty.
  *
- * This is not a theoretical concern. Three hands quoting 57%, 91% and 57%
- * against true equities near zero were 98% of one session's losses.
+ * Not a theoretical concern, but not a post-mortem either: replaying one
+ * session offline, the advisor would have quoted 57%, 91% and 57% on three
+ * hands whose true equities were near zero. Those hands were 98% of that
+ * session's losses — which the player reached without the panel open. So the
+ * numbers were never acted on, and the defect they expose is the model's, not
+ * a record of damage it did.
  */
 
 import { describe, expect, it } from 'vitest';
