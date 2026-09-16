@@ -77,6 +77,30 @@ export interface LeakReport {
    */
   readonly showdownNet: number;
   readonly nonShowdownNet: number;
+  /**
+   * Hands this player bet or raised in after the flop — the denominator both
+   * counts below belong to. Taken over every hand instead, a player who folds
+   * a lot pre-flop would look like one who never follows through.
+   *
+   * Pre-flop aggression is excluded on purpose: folding a raise to a re-raise
+   * is a different decision from building a pot across streets and handing it
+   * over, and mixing them hides the second.
+   */
+  readonly betHands: number;
+  /** Of those, hands won with everyone folding and no cards compared. */
+  readonly tookDown: number;
+  /** Chips gained in exactly those pots. */
+  readonly chipsTakenDown: number;
+  /** Of those, hands bet and then folded by this same player. */
+  readonly betThenFolded: number;
+  /**
+   * Every chip put into the hands they bet and then folded, blinds included.
+   *
+   * Not all of it was spent on the betting — some went in before the lead was
+   * taken — but all of it was surrendered in hands where they had the
+   * initiative and did not finish.
+   */
+  readonly chipsGivenUp: number;
 }
 
 const TEXAS = getVariant('texas');
@@ -116,6 +140,11 @@ export function buildLeakReport(
   let nonShowdownNet = 0;
   let seated = 0;
   let name = '';
+  let betHands = 0;
+  let tookDown = 0;
+  let chipsTakenDown = 0;
+  let betThenFolded = 0;
+  let chipsGivenUp = 0;
 
   for (const hand of hands) {
     const player = hand.players.find((seat) => seat.id === playerId);
@@ -124,8 +153,30 @@ export function buildLeakReport(
     name = player.name;
 
     const net = netFor(hand, playerId);
-    if (wentToShowdown(hand)) showdownNet += net;
+    const showdown = wentToShowdown(hand);
+    if (showdown) showdownNet += net;
     else nonShowdownNet += net;
+
+    const mine = hand.actions.filter((a) => a.playerId === playerId);
+    const bets = mine.filter(
+      (a) => a.street !== 'preflop' && (a.action === 'bet' || a.action === 'raise'),
+    );
+    if (bets.length > 0) {
+      betHands += 1;
+      if (!showdown && net > 0) {
+        tookDown += 1;
+        chipsTakenDown += net;
+      }
+      const fold = mine.find((a) => a.action === 'fold');
+      // Only a fold at or after the street the betting started on: a player
+      // cannot abandon a pot before they have begun building it.
+      if (fold && STREETS.indexOf(fold.street) >= STREETS.indexOf(bets[0]!.street)) {
+        betThenFolded += 1;
+        // Everything in the pot, blinds included — a blind posted into a hand
+        // you then built and abandoned was surrendered with the rest of it.
+        chipsGivenUp += player.committedTotal;
+      }
+    }
 
     for (const action of hand.actions) {
       if (action.playerId !== playerId) continue;
@@ -158,6 +209,11 @@ export function buildLeakReport(
     showdowns,
     showdownNet,
     nonShowdownNet,
+    betHands,
+    tookDown,
+    chipsTakenDown,
+    betThenFolded,
+    chipsGivenUp,
   };
 }
 

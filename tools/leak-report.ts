@@ -112,6 +112,19 @@ for (const r of reports) {
   );
 }
 
+console.log(`\n=== Fold equity: taken, and handed back ===\n`);
+console.log('player          bet postflop   took it down      chips won   bet then folded   chips given up');
+for (const r of reports) {
+  const pctOf = (n: number) => (r.betHands === 0 ? '  -' : `${Math.round((n / r.betHands) * 100)}%`);
+  console.log(
+    `${(isHero(r) ? '*' : ' ') + r.name.padEnd(14)}${String(r.betHands).padStart(8)}   ` +
+      `${`${r.tookDown} (${pctOf(r.tookDown)})`.padStart(12)}   ` +
+      `${`+${r.chipsTakenDown}`.padStart(9)}   ` +
+      `${`${r.betThenFolded} (${pctOf(r.betThenFolded)})`.padStart(13)}   ` +
+      `${String(r.chipsGivenUp).padStart(13)}`,
+  );
+}
+
 console.log('\n* = hero.  Rates read "share / out of how many". Only pots awarded');
 console.log('with a winning-hand label count as showdowns, so a hand shown after');
 console.log('everyone folded stays in the without-showdown column where it belongs.');
