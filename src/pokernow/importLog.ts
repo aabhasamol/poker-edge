@@ -9,7 +9,7 @@
 
 import { parseLogCsv } from './csv';
 import { HandTracker, LiveHand } from './handState';
-import { isHandsJson, logLinesFromHandsJson } from './handsJson';
+import { isHandsJson, logLinesFromHandsJson, viewerFromHandsJson } from './handsJson';
 import { parseLogMessage } from './logParser';
 import { orderLogLines } from './session';
 import { LogLine } from './types';
@@ -19,6 +19,14 @@ export interface ImportedSession {
   /** Everyone who sat down, in the order they were first seen. */
   readonly players: readonly { readonly id: string; readonly name: string }[];
   readonly source: 'csv' | 'json';
+  /**
+   * The seat the file was exported from, when the export says so.
+   *
+   * Whoever downloaded the file was sitting in that seat, which makes it the
+   * answer to "who is hero" without anybody being asked. Null for a CSV log,
+   * which names no seat, and for a host's export, which was taken from none.
+   */
+  readonly viewerId: string | null;
 }
 
 export class ImportError extends Error {}
@@ -30,6 +38,7 @@ export function importSession(text: string): ImportedSession {
 
   let lines: LogLine[];
   let source: ImportedSession['source'];
+  let viewerId: string | null = null;
 
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     let parsed: unknown;
@@ -43,6 +52,7 @@ export function importSession(text: string): ImportedSession {
     }
     lines = logLinesFromHandsJson(parsed);
     source = 'json';
+    viewerId = viewerFromHandsJson(parsed);
   } else {
     lines = parseLogCsv(trimmed);
     source = 'csv';
@@ -84,9 +94,16 @@ export function importSession(text: string): ImportedSession {
   const players = new Map<string, string>();
   for (const hand of hands) for (const seat of hand.players) players.set(seat.id, seat.name);
 
+  /*
+   * A seat named by the export but never actually dealt in is not a seat the
+   * reader can be, so it is dropped rather than offered.
+   */
+  const seated = viewerId !== null && players.has(viewerId) ? viewerId : null;
+
   return {
     hands,
     players: [...players].map(([id, name]) => ({ id, name })),
     source,
+    viewerId: seated,
   };
 }

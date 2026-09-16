@@ -34,6 +34,14 @@ interface JsonPlayer {
   readonly seat: number;
   readonly name: string;
   readonly stack: number;
+  /**
+   * This seat's hole cards, when they are known to whoever exported the file.
+   *
+   * Present for the viewer's own seat every hand, and for anybody who showed
+   * down. Those are very different facts, so which is which is decided by the
+   * export's `playerId` and never by the field being there.
+   */
+  readonly hand?: readonly string[];
 }
 
 interface JsonHand {
@@ -49,7 +57,21 @@ interface JsonHand {
 
 export interface HandsJsonExport {
   readonly gameId?: string;
+  /** The seat this file was exported from — whoever downloaded it. */
+  readonly playerId?: string;
   readonly hands?: readonly JsonHand[];
+}
+
+/**
+ * The seat the export was taken from, or null when it does not name one.
+ *
+ * This is the whole answer to "who is hero": the person holding the file is
+ * the person who was sitting there. A host's export names nobody, and guessing
+ * would put somebody else's cards under "your hand".
+ */
+export function viewerFromHandsJson(data: HandsJsonExport): string | null {
+  const id = data.playerId;
+  return typeof id === 'string' && id.length > 0 ? id : null;
 }
 
 /** True when this looks like a hands export rather than some other JSON. */
@@ -86,6 +108,7 @@ export function logLinesFromHandsJson(data: HandsJsonExport): LogLine[] {
   const lines: LogLine[] = [];
   let order = 0;
   const push = (msg: string) => lines.push({ msg, order: order++ });
+  const viewer = viewerFromHandsJson(data);
 
   for (const hand of data.hands ?? []) {
     const players = hand.players ?? [];
@@ -107,6 +130,15 @@ export function logLinesFromHandsJson(data: HandsJsonExport): LogLine[] {
           players.map((p) => `#${p.seat} "${p.name} @ ${p.id}" (${p.stack})`).join(' | '),
       );
     }
+
+    /*
+     * Only the viewer's own cards become "your hand". The same field carries
+     * an opponent's cards once they have shown down, and reading those as
+     * hero's would put somebody else's holding under every equity on screen.
+     */
+    const mine = viewer ? players.find((p) => p.id === viewer)?.hand : undefined;
+    const hole = mine ? cards(mine) : [];
+    if (hole.length > 0) push(`Your hand is ${hole.join(', ')}`);
 
     /*
      * The log says "bets" for the first wager on a street and "raises to" for
