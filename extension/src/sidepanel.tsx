@@ -15,6 +15,7 @@ import { hasPendingDecision, LiveHand } from '../../src/pokernow/handState';
 import './panel.css';
 import { Caveats, Decision, KeyNumbers, Options, Players, Standing, TableState } from './components';
 import { ErrorBoundary } from './ErrorBoundary';
+import { SessionImport } from './SessionImport';
 import { ExtensionMessage, STORAGE_KEY, StatusMessage } from './messages';
 import { useAdvice } from './useAdvice';
 import { useAnalysis } from '../../src/ui/useAnalysis';
@@ -204,6 +205,8 @@ function Panel() {
           </details>
         </section>
       )}
+
+      <SessionImport suggestedHeroId={heroId} />
     </div>
   );
 }
