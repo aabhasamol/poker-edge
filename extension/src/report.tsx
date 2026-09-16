@@ -10,6 +10,7 @@
 
 import { createRoot } from 'react-dom/client';
 import { StrictMode } from 'react';
+import { Finding, findLeaks } from '../../src/advisor/leakFindings';
 import { SeatReport } from '../../src/advisor/sessionReport';
 import { Rate } from '../../src/advisor/playProfile';
 import { StoredReport } from './reportData';
@@ -92,6 +93,42 @@ function MoneyBar({ seat, scale }: { seat: SeatReport; scale: number }) {
   );
 }
 
+/**
+ * What stands out, before the tables that justify it.
+ *
+ * Placed first because it is the only part someone will read every time, and
+ * every item carries the counts behind it: a flag that cannot be checked is an
+ * opinion wearing a percentage.
+ */
+function Findings({ findings }: { findings: readonly Finding[] }) {
+  if (findings.length === 0) {
+    return (
+      <section className="findings">
+        <h2>What stands out</h2>
+        <p className="read">
+          Nothing clears the bar. Either the session is too short to read, or nothing in it sits
+          far enough from the rest of the table to call a leak — both are ordinary, and neither
+          means the numbers below are uninteresting.
+        </p>
+      </section>
+    );
+  }
+  return (
+    <section className="findings">
+      <h2>What stands out</h2>
+      <ol className="finds">
+        {findings.map((finding) => (
+          <li key={finding.id} className={`find ${finding.severity}`}>
+            <h3>{finding.headline}</h3>
+            <p className="ev">{finding.evidence}</p>
+            {finding.advice && <p className="adv">{finding.advice}</p>}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function Report({ stored }: { stored: StoredReport }) {
   const { report, fileName, source } = stored;
   const hero = report.seats.find((s) => s.isHero) ?? null;
@@ -120,6 +157,8 @@ function Report({ stored }: { stored: StoredReport }) {
           Save as PDF
         </button>
       </header>
+
+      {hero && <Findings findings={findLeaks(report)} />}
 
       {hero && (
         <section className="summary">

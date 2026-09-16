@@ -17,7 +17,9 @@
 
 import { writeFileSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
+import { findLeaks } from '../src/advisor/leakFindings';
 import { LeakReport, buildLeakReport } from '../src/advisor/leakReport';
+import { buildSessionReport } from '../src/advisor/sessionReport';
 import { importSession } from '../src/pokernow/importLog';
 
 const args = process.argv.slice(2);
@@ -125,6 +127,24 @@ for (const r of reports) {
       `${`${r.betThenFolded} (${pctOf(r.betThenFolded)})`.padStart(13)}   ` +
       `${String(r.chipsGivenUp).padStart(13)}`,
   );
+}
+
+const heroId = reports.find((r) => isHero(r))?.playerId ?? null;
+if (heroId) {
+  const findings = findLeaks(buildSessionReport(hands, heroId));
+  console.log(`\n=== What stands out ===\n`);
+  if (findings.length === 0) {
+    console.log('Nothing clears the bar. Either the session is too short to read or');
+    console.log('nothing in it is far enough from the rest of the table to be worth');
+    console.log('calling a leak — both are ordinary outcomes, not a failure to look.');
+  }
+  for (const f of findings) {
+    const mark = f.severity === 'high' ? '!!' : f.severity === 'medium' ? ' !' : '  ';
+    console.log(`${mark} ${f.headline}`);
+    console.log(`   ${f.evidence}`);
+    if (f.advice) console.log(`   -> ${f.advice}`);
+    console.log();
+  }
 }
 
 console.log('\n* = hero.  Rates read "share / out of how many". Only pots awarded');
