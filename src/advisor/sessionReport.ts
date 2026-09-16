@@ -12,7 +12,7 @@
 
 import { LiveHand } from '../pokernow/handState';
 import { LeakReport, buildLeakReport } from './leakReport';
-import { PlayProfile, ProfiledDecision, profileSession } from './playProfile';
+import { PlayProfile, ProfiledDecision, netFor, profileSession } from './playProfile';
 
 export interface SeatReport {
   readonly id: string;
@@ -22,6 +22,16 @@ export interface SeatReport {
   readonly leaks: LeakReport;
   /** Chips won minus chips put in, across the session. */
   readonly net: number;
+  readonly handsWon: number;
+  /**
+   * The best and worst single hands.
+   *
+   * A session's total is often one pot. Knowing the biggest loser lets a
+   * reading say whether a result describes how somebody played or how one hand
+   * fell, which is the difference between a leak and a cooler.
+   */
+  readonly biggestWin: number;
+  readonly biggestLoss: number;
 }
 
 export interface SessionReport {
@@ -60,6 +70,9 @@ export function buildSessionReport(
     const profiled = hands.map((hand) => ({ hand, decisions: decisionsFor(hand, id) }));
     const profile = profileSession(profiled, id);
     const leaks = buildLeakReport(hands, id);
+    const nets = hands
+      .filter((hand) => hand.players.some((seat) => seat.id === id))
+      .map((hand) => netFor(hand, id));
     return {
       id,
       name,
@@ -67,6 +80,9 @@ export function buildSessionReport(
       profile,
       leaks,
       net: leaks.showdownNet + leaks.nonShowdownNet,
+      handsWon: nets.filter((n) => n > 0).length,
+      biggestWin: nets.length > 0 ? Math.max(0, ...nets) : 0,
+      biggestLoss: nets.length > 0 ? Math.min(0, ...nets) : 0,
     };
   });
 
