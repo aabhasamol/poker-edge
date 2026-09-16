@@ -756,7 +756,17 @@ function splitByPrice(
     total += weight;
     folding += weight * (1 - keep);
     reRaising += weight * keep * reRaiseSet(index, percentile);
-    return keep;
+    /*
+     * The surviving weight is how likely the holding was TIMES how often it
+     * continues — not the continuation probability on its own. Returning
+     * `keep` alone discarded everything the range model had learned from the
+     * betting: combos it had pushed down to 0.02 came back at nearly 1, and a
+     * 38-combo range narrowed by three streets of aggression was handed to the
+     * equity calculation as 809 combos of near-uniform junk. Raw equity then
+     * read 50% where the headline said 16%, and an all-in shove into a made
+     * flush scored +402 against folding's 0.
+     */
+    return weight * keep;
   });
 
   /*

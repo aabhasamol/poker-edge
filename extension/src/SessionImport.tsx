@@ -30,9 +30,16 @@ export function SessionImport({ suggestedHeroId }: { suggestedHeroId: string | n
       try {
         const session = importSession(await file.text());
         setStatus({ kind: 'ready', session, fileName: file.name });
-        // Pre-select the seat the live panel already believes is hero; the
-        // person can still change it, since a log may be from another seat.
-        const known = session.players.find((p) => p.id === suggestedHeroId);
+        /*
+         * Whoever exported the file was sitting in that seat, so the export
+         * answers "who is hero" by itself and nobody has to be asked. Falling
+         * back to the live panel's idea of hero covers a CSV log, which names
+         * no seat. Either way the choice stays editable — a file can be handed
+         * to someone else, and then neither guess is right.
+         */
+        const known =
+          session.players.find((p) => p.id === session.viewerId) ??
+          session.players.find((p) => p.id === suggestedHeroId);
         setHeroId(known?.id ?? '');
       } catch (error) {
         setStatus({
@@ -101,7 +108,11 @@ export function SessionImport({ suggestedHeroId }: { suggestedHeroId: string | n
             {status.session.hands.length} hands, {status.session.players.length} players ·{' '}
             {status.session.source === 'json' ? 'hand export' : 'log export'}
           </p>
-          <label htmlFor="session-hero">Which seat is you?</label>
+          <label htmlFor="session-hero">
+            {status.session.viewerId
+              ? 'Exported from this seat — change it if that is not you'
+              : 'Which seat is you?'}
+          </label>
           <select
             id="session-hero"
             value={heroId}

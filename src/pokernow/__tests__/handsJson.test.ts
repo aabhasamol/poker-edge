@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isHandsJson, logLinesFromHandsJson } from '../handsJson';
+import { isHandsJson, logLinesFromHandsJson, viewerFromHandsJson } from '../handsJson';
 import { HandTracker } from '../handState';
 import { parseLogMessage } from '../logParser';
 import { orderLogLines } from '../session';
@@ -122,6 +122,62 @@ describe('turning payload types back into log lines', () => {
      */
     const out = messages(hand([{ type: 99, seat: 1, value: 500 }]));
     expect(out.some((m) => m.includes('500'))).toBe(false);
+  });
+});
+
+describe('whose seat the export was taken from', () => {
+  /*
+   * The export names its own viewer in `playerId`, and carries that seat's
+   * hole cards on `players[].hand` every hand. Both were being dropped, so a
+   * JSON export produced a session with no hero and no hole cards — the panel
+   * could only offer a list of seats in the order they were first seen, and
+   * nothing that needs hero's cards could run at all.
+   */
+  it('reports the seat the file was exported from', () => {
+    expect(viewerFromHandsJson({ playerId: 'bbb', hands: [] })).toBe('bbb');
+  });
+
+  it('has no viewer when the export does not name one', () => {
+    // A host's export names no seat. Guessing one would put somebody else's
+    // cards under "your hand".
+    expect(viewerFromHandsJson({ hands: [] })).toBeNull();
+  });
+
+  it("states the viewer's own cards as their hand", () => {
+    const out = messages({
+      playerId: 'bbb',
+      hands: [{
+        id: 'h1', number: '1', gameType: 'th', smallBlind: 10, bigBlind: 20, dealerSeat: 1,
+        players: [
+          { id: 'aaa', seat: 1, name: 'Ann', stack: 2000 },
+          { id: 'bbb', seat: 5, name: 'Bo', stack: 2000, hand: ['Kc', '7c'] },
+        ],
+        events: [],
+      }],
+    });
+    expect(out).toContain('Your hand is K♣, 7♣');
+  });
+
+  it("never states an opponent's revealed cards as the viewer's hand", () => {
+    /*
+     * `hand` also appears on anyone who showed down, so keying off its
+     * presence rather than off the viewer's id would hand the reader an
+     * opponent's cards as their own — and every equity built on them would be
+     * confidently wrong.
+     */
+    const out = messages({
+      playerId: 'bbb',
+      hands: [{
+        id: 'h1', number: '1', gameType: 'th', smallBlind: 10, bigBlind: 20, dealerSeat: 1,
+        players: [
+          { id: 'aaa', seat: 1, name: 'Ann', stack: 2000, hand: ['As', 'Ad'] },
+          { id: 'bbb', seat: 5, name: 'Bo', stack: 2000, hand: ['Kc', '7c'] },
+        ],
+        events: [],
+      }],
+    });
+    expect(out).toContain('Your hand is K♣, 7♣');
+    expect(out.some((m) => m.startsWith('Your hand is A'))).toBe(false);
   });
 });
 
