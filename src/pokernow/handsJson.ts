@@ -81,6 +81,21 @@ export function isHandsJson(value: unknown): value is HandsJsonExport {
   return Array.isArray(hands) && hands.every((h) => typeof h === 'object' && h !== null);
 }
 
+/**
+ * How the export names a game, and how the log spells it.
+ *
+ * Getting this wrong is silent: an Omaha hand headed as Hold'em produces a
+ * four-card hold'em holding that the engine scores by the wrong rules, and the
+ * mistake shows up only as showdown strengths that are quietly incorrect. An
+ * unfamiliar code is therefore left as Hold'em with no pretence — it is the
+ * overwhelmingly common game — while every spelling of Omaha seen in the wild
+ * is matched.
+ */
+function variantHeader(gameType: unknown): string {
+  const code = typeof gameType === 'string' ? gameType.toLowerCase() : '';
+  return code.includes('omaha') || code === 'plo' ? 'Pot Limit Omaha' : "No Limit Texas Hold'em";
+}
+
 const SUITS: Record<string, string> = { s: '♠', h: '♥', d: '♦', c: '♣' };
 
 /** `Th` -> `10♥`. The log spells ten as two digits and suits as symbols. */
@@ -119,7 +134,7 @@ export function logLinesFromHandsJson(data: HandsJsonExport): LogLine[] {
     };
 
     const dealer = who(hand.dealerSeat);
-    const variant = hand.gameType === 'plo' ? "Pot Limit Omaha" : "No Limit Texas Hold'em";
+    const variant = variantHeader(hand.gameType);
     push(
       `-- starting hand #${hand.number ?? ''} (id: ${hand.id ?? ''})  ${variant}` +
         `${dealer ? ` (dealer: ${dealer})` : ''} --`,

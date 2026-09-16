@@ -125,6 +125,33 @@ describe('turning payload types back into log lines', () => {
   });
 });
 
+describe('which game was being dealt', () => {
+  /*
+   * A mixed table deals Hold'em and Omaha from the same seat, and the export
+   * says which per hand. Labelling an Omaha hand as Hold'em does not fail
+   * loudly — it produces a four-card hold'em hand that the engine then scores
+   * by the wrong rules, so the hands quietly carry wrong strengths into every
+   * showdown statistic.
+   */
+  it.each([
+    ['th', "No Limit Texas Hold'em"],
+    ['omaha', 'Pot Limit Omaha'],
+    ['plo', 'Pot Limit Omaha'],
+  ])('names %s correctly in the hand header', (gameType, expected) => {
+    const out = messages(hand([], { gameType }));
+    expect(out[0]).toContain(expected);
+  });
+
+  it('reaches the tracker as the right variant', () => {
+    for (const [gameType, variant] of [['th', 'texas'], ['omaha', 'omaha']] as const) {
+      const lines = orderLogLines(logLinesFromHandsJson(hand([], { gameType })));
+      const tracker = new HandTracker();
+      for (const line of lines) tracker.apply(parseLogMessage(line.msg));
+      expect(tracker.snapshot().variant).toBe(variant);
+    }
+  });
+});
+
 describe('whose seat the export was taken from', () => {
   /*
    * The export names its own viewer in `playerId`, and carries that seat's

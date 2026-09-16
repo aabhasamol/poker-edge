@@ -1,7 +1,7 @@
 /**
  * Leak report: where every seat's chips come from, and where they leak away.
  *
- *   npm run leaks -- <log.csv> [--hero "Your Name"] [--json out.json]
+ *   npm run leaks -- <log> [--hero "Name"] [--variant texas|omaha] [--json out.json]
  *
  * Reads a PokerNow export and prints, per player, the three splits that decide
  * what to actually change: initiative by street, folding by street, and the
@@ -18,40 +18,42 @@
 import { writeFileSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { LeakReport, buildLeakReport } from '../src/advisor/leakReport';
-import { parseLogCsv } from '../src/pokernow/csv';
-import { HandTracker, LiveHand } from '../src/pokernow/handState';
-import { parseLogMessage } from '../src/pokernow/logParser';
-import { orderLogLines } from '../src/pokernow/session';
+import { importSession } from '../src/pokernow/importLog';
 
 const args = process.argv.slice(2);
-const path = args.find((arg) => !arg.startsWith('--') && arg.endsWith('.csv'));
+const path = args.find(
+  (arg) => !arg.startsWith('--') && (arg.endsWith('.csv') || arg.endsWith('.json')),
+);
 if (!path) {
   console.error('Usage: npm run leaks -- <log.csv> [--hero "Your Name"] [--json out.json]');
   process.exit(1);
 }
 const heroName = (args[args.indexOf('--hero') + 1] ?? '').toLowerCase();
 const jsonOut = args.indexOf('--json') >= 0 ? args[args.indexOf('--json') + 1] : null;
-
-const lines = orderLogLines(parseLogCsv(readFileSync(path, 'utf8')));
-if (lines.length === 0) {
-  console.error(`${path} contains no log lines — a few dozen bytes means the captcha page.`);
+const variantArg = args.indexOf('--variant') >= 0 ? args[args.indexOf('--variant') + 1] : undefined;
+if (variantArg && variantArg !== 'texas' && variantArg !== 'omaha') {
+  console.error(`--variant must be texas or omaha, not "${variantArg}"`);
   process.exit(1);
 }
 
-const hands: LiveHand[] = [];
-let current: string[] | null = null;
-const blocks: string[][] = [];
-for (const line of lines) {
-  if (line.msg.startsWith('-- starting hand')) {
-    current = [];
-    blocks.push(current);
-  }
-  if (current) current.push(line.msg);
+let session;
+try {
+  session = importSession(readFileSync(path, 'utf8'), variantArg ? { variant: variantArg } : {});
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
 }
-for (const block of blocks) {
-  const tracker = new HandTracker();
-  for (const message of block) tracker.apply(parseLogMessage(message));
-  hands.push(tracker.snapshot());
+const hands = session.hands;
+
+const mix = Object.entries(session.variants);
+if (mix.length > 1) {
+  console.log(
+    `\nThis file mixes ${mix.map(([v, n]) => `${n} ${v}`).join(' and ')} hands.` +
+      (variantArg
+        ? ` Counting ${variantArg} only.`
+        : ' Counting all of them — pass --variant texas to separate them, since four' +
+          '\nhole cards make different hands and the two do not average.'),
+  );
 }
 
 const seats = new Map<string, string>();

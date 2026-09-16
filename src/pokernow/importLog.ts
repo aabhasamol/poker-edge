@@ -13,6 +13,7 @@ import { isHandsJson, logLinesFromHandsJson, viewerFromHandsJson } from './hands
 import { parseLogMessage } from './logParser';
 import { orderLogLines } from './session';
 import { LogLine } from './types';
+import { VariantId } from '../engine/variant';
 
 export interface ImportedSession {
   readonly hands: readonly LiveHand[];
@@ -27,12 +28,27 @@ export interface ImportedSession {
    * which names no seat, and for a host's export, which was taken from none.
    */
   readonly viewerId: string | null;
+  /**
+   * How many hands of each variant the file holds.
+   *
+   * A mixed table deals Hold'em and Omaha from the same seat, and the two do
+   * not belong in one set of statistics: four hole cards make far stronger
+   * hands, so the same VPIP, the same showdown rate and the same idea of "top
+   * pair" mean different things. Reported so a mixed file is visible rather
+   * than silently averaged.
+   */
+  readonly variants: Readonly<Record<string, number>>;
+}
+
+export interface ImportOptions {
+  /** Keep only hands of this variant. Omit to keep every hand. */
+  readonly variant?: VariantId;
 }
 
 export class ImportError extends Error {}
 
 /** Parse either export into hands, or explain why the file is not one. */
-export function importSession(text: string): ImportedSession {
+export function importSession(text: string, options: ImportOptions = {}): ImportedSession {
   const trimmed = text.trim();
   if (trimmed.length === 0) throw new ImportError('That file is empty.');
 
@@ -74,6 +90,18 @@ export function importSession(text: string): ImportedSession {
     hands.push(tracker.snapshot());
   }
 
+  const variants: Record<string, number> = {};
+  for (const hand of hands) variants[hand.variant] = (variants[hand.variant] ?? 0) + 1;
+
+  const kept = options.variant ? hands.filter((h) => h.variant === options.variant) : hands;
+
+  if (kept.length === 0 && hands.length > 0 && options.variant) {
+    throw new ImportError(
+      `No ${options.variant} hands in that file — it holds ` +
+        `${Object.entries(variants).map(([v, n]) => `${n} ${v}`).join(', ')}.`,
+    );
+  }
+
   if (hands.length === 0) {
     /*
      * The most common bad file by far, and worth naming. PokerNow gates its
@@ -92,7 +120,7 @@ export function importSession(text: string): ImportedSession {
   }
 
   const players = new Map<string, string>();
-  for (const hand of hands) for (const seat of hand.players) players.set(seat.id, seat.name);
+  for (const hand of kept) for (const seat of hand.players) players.set(seat.id, seat.name);
 
   /*
    * A seat named by the export but never actually dealt in is not a seat the
@@ -101,9 +129,10 @@ export function importSession(text: string): ImportedSession {
   const seated = viewerId !== null && players.has(viewerId) ? viewerId : null;
 
   return {
-    hands,
+    hands: kept,
     players: [...players].map(([id, name]) => ({ id, name })),
     source,
     viewerId: seated,
+    variants,
   };
 }
