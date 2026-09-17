@@ -104,6 +104,26 @@
         ],
         "description": "Fact-forcing gate: block first Edit/Write/MultiEdit per file and demand investigation (importers, data schemas, user instruction) before allowing",
         "id": "pre:edit-write:gateguard-fact-force"
+      },
+      {
+        "matcher": "Bash|Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/graphify hook-guard search",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/graphify hook-guard read",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -215,7 +235,7 @@
             "timeout": 300
           }
         ],
-        "description": "Batch format (Biome/Prettier) and typecheck (tsc) all JS/TS files edited this response — runs once at Stop instead of after every Edit",
+        "description": "Batch format (Biome/Prettier) and typecheck (tsc) all JS/TS files edited this response \u2014 runs once at Stop instead of after every Edit",
         "id": "stop:format-typecheck"
       },
       {

@@ -11,3 +11,4 @@ coverage
 logs/
 *.pokernow.csv
 *.pokernow.json
+graphify-out/cache/
