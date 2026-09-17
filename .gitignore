@@ -11,5 +11,9 @@ coverage
 logs/
 *.pokernow.csv
 *.pokernow.json
+
+# Graphify output. graph.json and .graphify_analysis.json are committed on
+# purpose — they are the code map. The cache is regenerable build output, and
+# .graphify_root records an absolute path from whichever machine ran it.
 graphify-out/cache/
-graphify-out/cache/
+graphify-out/.graphify_root

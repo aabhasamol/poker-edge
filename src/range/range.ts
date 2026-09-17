@@ -36,10 +36,6 @@ export class Range {
     return new Range(new Float64Array(COMBO_COUNT).fill(1));
   }
 
-  static empty(): Range {
-    return new Range(new Float64Array(COMBO_COUNT));
-  }
-
   /**
    * The strongest `percent` of starting hands, by equity against a random hand.
    *
@@ -166,16 +162,6 @@ export class Range {
       const weight = this.weights[index]!;
       if (weight === 0) continue;
       next[index] = clamp(factor(index, weight), 0, 1) * 1;
-    }
-    return new Range(next);
-  }
-
-  /** Blend two ranges: `weight` of 0 keeps this range, 1 takes the other. */
-  blend(other: Range, weight: number): Range {
-    const w = clamp(weight, 0, 1);
-    const next = new Float64Array(COMBO_COUNT);
-    for (let index = 0; index < COMBO_COUNT; index++) {
-      next[index] = this.weights[index]! * (1 - w) + other.weights[index]! * w;
     }
     return new Range(next);
   }

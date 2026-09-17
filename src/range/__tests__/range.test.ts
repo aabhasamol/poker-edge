@@ -135,19 +135,6 @@ describe('card removal', () => {
 });
 
 describe('combining ranges', () => {
-  it('blends toward the other range', () => {
-    const tight = Range.topPercent(5);
-    const wide = Range.topPercent(50);
-    const mixed = tight.blend(wide, 0.5);
-    expect(mixed.comboCount()).toBeGreaterThan(tight.comboCount());
-    expect(mixed.comboCount()).toBeLessThan(wide.comboCount());
-  });
-
-  it('keeps the original when blending with weight 0', () => {
-    const tight = Range.topPercent(5);
-    expect(tight.blend(Range.uniform(), 0).comboCount()).toBeCloseTo(tight.comboCount(), 6);
-  });
-
   it('reweights per combination', () => {
     const halved = Range.parse('AA').range.reweight((_, weight) => weight * 0.5);
     expect(halved.comboCount()).toBeCloseTo(3, 6);
